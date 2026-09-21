@@ -2,15 +2,25 @@
 
 ## Data harga (structured)
 
-| Provider | Realtime | Catatan |
-|----------|----------|---------|
-| **yfinance** (default) | ❌ delay ~15 mnt | Gratis. Ticker IDX pakai sufiks `.JK` (mis. `BBCA.JK`). Cocok untuk swing/breakout harian, **bukan** scalping. |
-| GoAPI.id | ✅ | Berbayar. Perlu `GOAPI_KEY`. Buat `GoAPIProvider` di `market_data.py`. |
-| RTI / websocket sekuritas | ✅ | Perlu langganan/izin. Hormati ToS. |
+Pilih via `MARKET_DATA_PROVIDER` di `.env`.
 
-> **Konsekuensi delay:** dengan yfinance, Agent 5 mengalarm berdasarkan harga
-> tertunda. Untuk sinyal intraday presisi, pindah ke provider realtime dan
-> arahkan strategi sesuai (jangan scalping dengan data delay).
+| Provider | Key? | Realtime | Catatan |
+|----------|------|----------|---------|
+| **`yahoo_direct`** (default, gratis) | ❌ | delay ~15 mnt | **Rekomendasi untuk VPS.** Akses endpoint chart Yahoo langsung memakai `curl_cffi` (impersonasi browser) → tahan blokir **HTTP 429** yang menimpa yfinance di IP data-center. Universe `.JK`. |
+| `yfinance` | ❌ | delay ~15 mnt | Library yfinance. Sering kena 429 dari IP VPS. Kini juga memakai sesi `curl_cffi` bila terpasang. |
+| `fmp` | ✅ (gratis) | ~EOD | Financial Modeling Prep. Daftar gratis → `FMP_API_KEY`. Batas ~250 req/hari. Mendukung sufiks `.JK`. |
+| `goapi` | ✅ (bayar) | ✅ | GoAPI.id. Perlu `GOAPI_KEY`. Buat `GoAPIProvider` di `market_data.py`. |
+| `rti` / websocket sekuritas | ✅ (bayar) | ✅ | Perlu langganan/izin. Hormati ToS. |
+
+> **Kalau kena 429 terus:** ganti ke `MARKET_DATA_PROVIDER=yahoo_direct` dan
+> pastikan `curl_cffi` terpasang (`pip install curl_cffi`). Ini biasanya
+> menyelesaikan blokir karena permintaan menyamar sebagai browser asli.
+> Jika masih diblokir (IP VPS masuk daftar hitam Yahoo), pakai `fmp`
+> (gratis, butuh key) atau provider berbayar.
+
+> **Konsekuensi delay:** dengan sumber gratis, Agent 5 mengalarm berdasarkan
+> harga tertunda ~15 menit. Untuk sinyal intraday presisi, pakai provider
+> realtime dan arahkan strategi sesuai (jangan scalping dengan data delay).
 
 ## Data tak terstruktur (news/sentimen)
 

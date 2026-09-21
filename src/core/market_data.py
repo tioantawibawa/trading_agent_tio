@@ -1,11 +1,16 @@
 """Adapter data pasar — antarmuka tunggal, implementasi pluggable.
 
-Default: yfinance (gratis, delay ~15 menit). Untuk realtime akurat, buat
-adapter GoAPI/RTI dengan mengimplementasikan protokol yang sama lalu
-daftarkan di `get_provider()`.
+Provider (pilih via MARKET_DATA_PROVIDER di .env):
+  - yahoo_direct : REKOMENDASI utk VPS. Endpoint chart Yahoo langsung dengan
+                   browser-impersonation (curl_cffi) — sering lolos blokir 429
+                   yang menimpa yfinance di IP data-center. Gratis, tanpa key.
+  - yfinance     : Library yfinance (mudah kena 429 di VPS). Kini juga memakai
+                   sesi curl_cffi bila tersedia.
+  - fmp          : Financial Modeling Prep (butuh FMP_API_KEY gratis).
+  - goapi / rti  : placeholder untuk provider berbayar realtime.
 
-Semua fungsi mengembalikan struktur sederhana (dict / pandas.DataFrame),
-sehingga agent tidak bergantung pada detail vendor.
+Semua fungsi mengembalikan pandas.DataFrame (kolom Open/High/Low/Close/Volume)
+atau float, sehingga agent tidak bergantung pada detail vendor.
 """
 from __future__ import annotations
 
@@ -16,6 +21,9 @@ from src.core.logging_conf import get_logger
 
 log = get_logger(__name__)
 
+# Range Yahoo yang valid untuk parameter chart API.
+_YF_RANGES = {"1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"}
+
 
 def to_yahoo(ticker: str) -> str:
     """Ubah kode IDX (mis. 'BBCA') menjadi simbol Yahoo ('BBCA.JK')."""
@@ -23,9 +31,117 @@ def to_yahoo(ticker: str) -> str:
     return t if t.endswith(".JK") else f"{t}.JK"
 
 
+def _http_get_json(url: str, params: dict, timeout: int = 30):
+    """GET JSON dengan browser-impersonation bila curl_cffi ada, else requests."""
+    try:
+        from curl_cffi import requests as creq
+
+        r = creq.get(url, params=params, impersonate="chrome", timeout=timeout)
+    except ImportError:
+        import requests
+
+        ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+        r = requests.get(url, params=params, headers=ua, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
 class MarketDataProvider(Protocol):
     def history(self, ticker: str, period: str = "3mo", interval: str = "1d"): ...
     def last_price(self, ticker: str) -> float | None: ...
+
+
+class YahooDirectProvider:
+    """Akses langsung endpoint chart Yahoo Finance via curl_cffi.
+
+    Meniru header & TLS fingerprint browser sehingga lebih tahan terhadap
+    blokir 429 yang menimpa yfinance di IP VPS. Tanpa API key.
+    """
+
+    CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/"
+
+    def _fetch(self, ticker: str, rng: str, interval: str):
+        url = self.CHART_URL + to_yahoo(ticker)
+        return _http_get_json(url, {"range": rng, "interval": interval})
+
+    def history(self, ticker: str, period: str = "3mo", interval: str = "1d"):
+        import pandas as pd
+
+        rng = period if period in _YF_RANGES else "3mo"
+        try:
+            data = self._fetch(ticker, rng, interval)
+            result = data["chart"]["result"][0]
+            ts = result.get("timestamp") or []
+            q = result["indicators"]["quote"][0]
+            df = pd.DataFrame(
+                {
+                    "Open": q.get("open"),
+                    "High": q.get("high"),
+                    "Low": q.get("low"),
+                    "Close": q.get("close"),
+                    "Volume": q.get("volume"),
+                },
+                index=pd.to_datetime(ts, unit="s"),
+            )
+            return df.dropna(subset=["Close"])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("yahoo_direct history %s gagal: %s", ticker, exc)
+            return pd.DataFrame()
+
+    def last_price(self, ticker: str) -> float | None:
+        try:
+            data = self._fetch(ticker, "1d", "1m")
+            meta = data["chart"]["result"][0]["meta"]
+            price = meta.get("regularMarketPrice")
+            return float(price) if price is not None else None
+        except Exception as exc:  # noqa: BLE001
+            log.debug("yahoo_direct last_price %s gagal: %s", ticker, exc)
+            return None
+
+
+class FMPProvider:
+    """Financial Modeling Prep — gratis dengan API key (FMP_API_KEY).
+
+    Mendukung simbol IDX dengan sufiks .JK. Batas free tier ~250 request/hari,
+    cukup untuk watchlist kecil beberapa kali sehari.
+    """
+
+    BASE = "https://financialmodelingprep.com/api/v3"
+
+    def history(self, ticker: str, period: str = "3mo", interval: str = "1d"):
+        import pandas as pd
+
+        if not settings.fmp_api_key:
+            log.warning("FMP_API_KEY kosong — provider fmp tidak bisa dipakai.")
+            return pd.DataFrame()
+        n = {"5d": 5, "1mo": 22, "3mo": 66, "6mo": 132, "1y": 252}.get(period, 66)
+        url = f"{self.BASE}/historical-price-full/{to_yahoo(ticker)}"
+        try:
+            data = _http_get_json(url, {"timeseries": n, "apikey": settings.fmp_api_key})
+            rows = list(reversed(data.get("historical", [])))  # jadikan urut lama→baru
+            if not rows:
+                return pd.DataFrame()
+            df = pd.DataFrame(rows)
+            df.index = pd.to_datetime(df["date"])
+            return df.rename(columns={
+                "open": "Open", "high": "High", "low": "Low",
+                "close": "Close", "volume": "Volume",
+            })[["Open", "High", "Low", "Close", "Volume"]]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("fmp history %s gagal: %s", ticker, exc)
+            return pd.DataFrame()
+
+    def last_price(self, ticker: str) -> float | None:
+        if not settings.fmp_api_key:
+            return None
+        url = f"{self.BASE}/quote-short/{to_yahoo(ticker)}"
+        try:
+            data = _http_get_json(url, {"apikey": settings.fmp_api_key})
+            return float(data[0]["price"]) if data else None
+        except Exception as exc:  # noqa: BLE001
+            log.debug("fmp last_price %s gagal: %s", ticker, exc)
+            return None
 
 
 class YFinanceProvider:
@@ -58,21 +174,38 @@ class YFinanceProvider:
         log.warning("%s %s gagal: %s", what, ticker, last_exc)
         return None
 
-    def history(self, ticker: str, period: str = "3mo", interval: str = "1d"):
-        import pandas as pd
+    @staticmethod
+    def _session():
+        """Sesi curl_cffi (impersonate browser) bila tersedia — bantu hindari 429."""
+        try:
+            from curl_cffi import requests as creq
+
+            return creq.Session(impersonate="chrome")
+        except ImportError:
+            return None
+
+    def _ticker(self, ticker: str):
         import yfinance as yf
 
+        sess = self._session()
+        try:
+            return yf.Ticker(to_yahoo(ticker), session=sess) if sess else yf.Ticker(to_yahoo(ticker))
+        except TypeError:
+            # Versi yfinance yang tidak menerima parameter session.
+            return yf.Ticker(to_yahoo(ticker))
+
+    def history(self, ticker: str, period: str = "3mo", interval: str = "1d"):
+        import pandas as pd
+
         def _fetch():
-            return yf.Ticker(to_yahoo(ticker)).history(period=period, interval=interval)
+            return self._ticker(ticker).history(period=period, interval=interval)
 
         df = self._retry(_fetch, "history", ticker)
         return df if df is not None else pd.DataFrame()
 
     def last_price(self, ticker: str) -> float | None:
-        import yfinance as yf
-
         def _fetch():
-            fi = yf.Ticker(to_yahoo(ticker)).fast_info
+            fi = self._ticker(ticker).fast_info
             price = fi.get("last_price") if hasattr(fi, "get") else fi["lastPrice"]
             return float(price) if price else None
 
@@ -93,8 +226,12 @@ class NullProvider:
 
 def get_provider() -> MarketDataProvider:
     name = settings.market_data_provider.lower()
+    if name in ("yahoo_direct", "yahoo", "yahoodirect"):
+        return YahooDirectProvider()
     if name == "yfinance":
         return YFinanceProvider()
+    if name == "fmp":
+        return FMPProvider()
     # TODO: tambahkan GoAPIProvider / RTIProvider di sini untuk realtime.
     log.warning("Provider '%s' belum diimplementasikan — memakai NullProvider.", name)
     return NullProvider()

@@ -34,9 +34,10 @@ class Settings(BaseSettings):
     watchlist: str = "BBCA,BBRI,TLKM,ASII,ANTM"
 
     # Sumber data
-    market_data_provider: str = "yfinance"
+    market_data_provider: str = "yahoo_direct"
     goapi_key: str = ""
     rti_token: str = ""
+    fmp_api_key: str = ""
 
     # LLM
     llm_provider: str = "anthropic"
