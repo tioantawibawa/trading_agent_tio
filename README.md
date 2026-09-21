@@ -23,6 +23,11 @@ berbasis loop mandiri).
 | 5 | **Realtime Monitor** (`agent5_monitor`) | Pantau harga live → alert Telegram (BUY/TP/CUT LOSS) | Jam bursa |
 | 6 | **Portfolio Vision** (`agent6_portfolio`) | Baca screenshot portofolio via Telegram (Vision LLM) | On-demand |
 
+**Perintah Telegram:** `/plan` (rencana hari ini), `/portfolio` (ringkasan),
+`/report` (prospek 7 hari semua saham portofolio), `/target KODE` (prospek 7
+hari satu saham), atau kirim screenshot portofolio. Setara CLI: `./ta report`,
+`./ta target BBCA`.
+
 ## Alur Harian (WIB)
 
 ```

@@ -35,6 +35,8 @@ async def cmd_start(update, context):  # noqa: ANN001
         "Perintah:\n"
         "/plan — trading plan aktif hari ini\n"
         "/portfolio — ringkasan portofolio\n"
+        "/report — prospek 7 hari untuk semua saham di portofolio\n"
+        "/target KODE — prospek 7 hari satu saham (mis. /target BBCA)\n"
         "Kirim screenshot portofolio untuk dianalisa."
     )
 
@@ -69,7 +71,38 @@ async def cmd_portfolio(update, context):  # noqa: ANN001
             f"• {p['ticker']}: {p.get('lots')} lot @ Rp{p.get('avg_price')} "
             f"(now Rp{p.get('last_price')})"
         )
+    lines.append("\nKetik /report untuk prospek 7 hari tiap saham.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_target(update, context):  # noqa: ANN001
+    if not _authorized(update):
+        return
+    from src.core.outlook import target_report
+
+    args = context.args if hasattr(context, "args") else []
+    if not args:
+        await update.message.reply_text("Format: /target KODE (mis. /target BBCA)")
+        return
+    ticker = args[0].upper()
+    # Ambil avg_price dari portofolio bila saham ini dimiliki.
+    avg = next((p.get("avg_price") for p in dbm.get_portfolio()
+                if p["ticker"] == ticker), None)
+    await update.message.reply_text(f"⏳ Menganalisa {ticker}…")
+    text = target_report(ticker, avg_price=avg)
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_report(update, context):  # noqa: ANN001
+    if not _authorized(update):
+        return
+    from src.core.outlook import portfolio_report
+
+    await update.message.reply_text("⏳ Menyusun laporan portofolio 7 hari…")
+    text = portfolio_report()
+    # Telegram batasi ~4096 char; potong bila perlu.
+    for chunk in [text[i:i + 3800] for i in range(0, len(text), 3800)]:
+        await update.message.reply_text(chunk, parse_mode="HTML")
 
 
 async def on_photo(update, context):  # noqa: ANN001
@@ -101,6 +134,8 @@ def build_application():
     app.add_handler(CommandHandler(["start", "help"], cmd_start))
     app.add_handler(CommandHandler("plan", cmd_plan))
     app.add_handler(CommandHandler("portfolio", cmd_portfolio))
+    app.add_handler(CommandHandler("report", cmd_report))
+    app.add_handler(CommandHandler("target", cmd_target))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     return app
 

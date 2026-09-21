@@ -134,6 +134,12 @@ def main() -> None:
                         help="Uji baca gambar (Agent 6) dari file lokal")
     tv.add_argument("image", help="Path file gambar (png/jpg)")
 
+    sub.add_parser("report", parents=[common],
+                   help="Laporan prospek 7 hari untuk portofolio")
+    tg = sub.add_parser("target", parents=[common],
+                        help="Prospek 7 hari satu saham")
+    tg.add_argument("ticker", help="Kode saham IDX, mis. BBCA")
+
     wl = sub.add_parser("watchlist", parents=[common], help="Kelola watchlist")
     wl.add_argument("--add", help="Tambah ticker (pisah koma), mis. GOTO,BRIS")
     wl.add_argument("--remove", help="Hapus ticker (pisah koma)")
@@ -178,6 +184,16 @@ def main() -> None:
         mt = mimetypes.guess_type(str(p))[0] or "image/png"
         res = analyze_screenshot(p.read_bytes(), media_type=mt)
         log.info("Ringkasan:\n%s", res["summary"])
+    elif args.cmd == "report":
+        from src.core.outlook import portfolio_report
+        import re
+        print(re.sub(r"</?b>|</?i>", "", portfolio_report()))
+    elif args.cmd == "target":
+        from src.core.outlook import target_report
+        import re
+        avg = next((p.get("avg_price") for p in dbm.get_portfolio()
+                    if p["ticker"] == args.ticker.upper()), None)
+        print(re.sub(r"</?b>|</?i>", "", target_report(args.ticker, avg_price=avg)))
     elif args.cmd == "watchlist":
         _watchlist(args)
     elif args.cmd == "run-agent":
