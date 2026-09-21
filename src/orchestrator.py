@@ -8,7 +8,8 @@ Timeline harian (Senin–Jumat):
   20.00  Agent 1  Harvester (sesi malam)
   09.10  Agent 2  Analyst  → Agent 3  Quant  (berurutan)
   09.15  Agent 4  Reporter (email)
-  16.10  Rekonsiliasi harian (nonaktifkan plan, reset watchlist runtime)
+  16.10  Rekonsiliasi harian (nonaktifkan plan)
+  16.50  Review pergerakan portofolio harian → Telegram
   jam bursa  Agent 5  polling harga tiap MONITOR_POLL_SECONDS
 """
 from __future__ import annotations
@@ -42,6 +43,17 @@ def _job_agent4() -> None:
 def _job_reconcile() -> None:
     log.info("Rekonsiliasi harian: nonaktifkan trade plan.")
     dbm.deactivate_plans()
+
+
+async def _job_daily_review() -> None:
+    """Kirim review pergerakan portofolio harian ke Telegram (sore hari)."""
+    from src.core.notifier import send_telegram
+    from src.core.outlook import portfolio_daily_review
+
+    log.info("Menyusun review portofolio harian…")
+    text = portfolio_daily_review()
+    for chunk in [text[i:i + 3800] for i in range(0, len(text), 3800)]:
+        await send_telegram(chunk)
 
 
 async def _monitor_loop() -> None:
@@ -86,6 +98,11 @@ async def serve() -> None:
     # Rekonsiliasi — 16.10 WIB.
     sched.add_job(_job_reconcile, CronTrigger(day_of_week="mon-fri", hour=16, minute=10, timezone=tz),
                   id="reconcile", replace_existing=True)
+
+    # Review portofolio harian ke Telegram — 16.50 WIB.
+    sched.add_job(_job_daily_review,
+                  CronTrigger(day_of_week="mon-fri", hour=16, minute=50, timezone=tz),
+                  id="daily_review", replace_existing=True)
 
     sched.start()
     log.info("Scheduler aktif (TZ=%s). Job: %s", tz, [j.id for j in sched.get_jobs()])

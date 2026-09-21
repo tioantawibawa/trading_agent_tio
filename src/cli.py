@@ -241,6 +241,8 @@ def main() -> None:
                    help="Rekonsiliasi manual: nonaktifkan semua trade plan hari ini")
     sub.add_parser("report", parents=[common],
                    help="Laporan prospek 7 hari untuk portofolio")
+    sub.add_parser("review", parents=[common],
+                   help="Review pergerakan portofolio hari ini (uji job 16.50)")
     tg = sub.add_parser("target", parents=[common],
                         help="Prospek 7 hari satu saham")
     tg.add_argument("ticker", help="Kode saham IDX, mis. BBCA")
@@ -302,6 +304,10 @@ def main() -> None:
         from src.core.outlook import portfolio_report
         import re
         print(re.sub(r"</?b>|</?i>", "", portfolio_report()))
+    elif args.cmd == "review":
+        from src.core.outlook import portfolio_daily_review
+        import re
+        print(re.sub(r"</?b>|</?i>", "", portfolio_daily_review()))
     elif args.cmd == "target":
         from src.core.outlook import target_report
         import re

@@ -11,6 +11,7 @@ Dipakai oleh Agent 6 / bot Telegram (perintah /target & /report) dan CLI.
 from __future__ import annotations
 
 import math
+from datetime import date
 from statistics import mean
 from typing import Any
 
@@ -145,6 +146,76 @@ def target_report(ticker: str, avg_price: float | None = None) -> str:
     if not o:
         return f"Maaf, data untuk {ticker.upper()} tidak cukup untuk analisa."
     return format_outlook_html(o)
+
+
+def portfolio_daily_review(with_narrative: bool = True) -> str:
+    """Review pergerakan harga portofolio HARI INI (untuk kirim sore hari).
+
+    Untuk tiap posisi: harga penutupan, perubahan harian (%), dan floating P/L.
+    Plus ringkasan tingkat portofolio (perubahan hari ini & total floating).
+    """
+    from src.core import database as dbm
+
+    positions = dbm.get_portfolio()
+    if not positions:
+        return ("🌇 Review harian: portofolio kosong. Kirim screenshot portofolio "
+                "ke bot untuk mengaktifkan review otomatis.")
+
+    provider = get_provider()
+    lines = [f"🌇 <b>Review Portofolio Harian — {date.today().strftime('%d %b %Y')}</b>\n"]
+    total_val = 0.0        # nilai posisi hari ini
+    total_val_prev = 0.0   # nilai posisi kemarin (untuk % harian portofolio)
+    total_floating = 0.0
+    detail_for_llm: list[str] = []
+
+    for pos in positions:
+        tk = pos["ticker"]
+        lots = pos.get("lots") or 0
+        avg = pos.get("avg_price")
+        df = provider.history(tk, period="1mo", interval="1d")
+        if df is None or len(df) < 2:
+            lines.append(f"• {tk}: data tidak tersedia")
+            continue
+        close = float(df["Close"].iloc[-1])
+        prev = float(df["Close"].iloc[-2])
+        day_pct = (close - prev) / prev * 100 if prev else 0.0
+        arrow = "🟢" if day_pct >= 0 else "🔴"
+        val = lots * 100 * close
+        total_val += val
+        total_val_prev += lots * 100 * prev
+
+        line = f"{arrow} <b>{tk}</b> {_rp(close)} ({day_pct:+.2f}% hari ini)"
+        if avg:
+            floating_pct = (close - avg) / avg * 100
+            floating_rp = lots * 100 * (close - avg)
+            total_floating += floating_rp
+            line += f" · floating {floating_pct:+.1f}%"
+        if lots:
+            line += f" · {lots} lot"
+        lines.append(line)
+        detail_for_llm.append(f"{tk} {day_pct:+.1f}%")
+
+    port_day_pct = ((total_val - total_val_prev) / total_val_prev * 100
+                    if total_val_prev else 0.0)
+    port_arrow = "🟢" if port_day_pct >= 0 else "🔴"
+    lines.append(f"\n{port_arrow} <b>Portofolio hari ini: {port_day_pct:+.2f}%</b>")
+    if total_floating:
+        lines.append(f"Total floating P/L: <b>{_rp(total_floating)}</b>")
+    if total_val:
+        lines.append(f"Estimasi nilai posisi: {_rp(total_val)}")
+
+    if with_narrative and detail_for_llm:
+        note = complete(
+            "Dalam 1-2 kalimat ringkas (bahasa Indonesia), simpulkan pergerakan "
+            f"portofolio saham hari ini: {', '.join(detail_for_llm)}. "
+            f"Perubahan total {port_day_pct:+.1f}%. Objektif, tanpa ajakan transaksi.",
+            max_tokens=150,
+        )
+        if note:
+            lines.append(f"\n<i>{note}</i>")
+
+    lines.append("\n⚠️ Alat bantu analisa, bukan nasihat keuangan.")
+    return "\n".join(lines)
 
 
 def portfolio_report() -> str:

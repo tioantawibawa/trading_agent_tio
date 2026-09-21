@@ -36,6 +36,7 @@ async def cmd_start(update, context):  # noqa: ANN001
         "/plan — trading plan aktif hari ini\n"
         "/portfolio — ringkasan portofolio\n"
         "/report — prospek 7 hari untuk semua saham di portofolio\n"
+        "/review — review pergerakan portofolio hari ini\n"
         "/target KODE — prospek 7 hari satu saham (mis. /target BBCA)\n"
         "/settarget KODE TP SL — set target profit & cut loss (alert otomatis)\n"
         "Kirim screenshot portofolio untuk dianalisa (target/stop dihitung otomatis)."
@@ -92,6 +93,17 @@ async def cmd_target(update, context):  # noqa: ANN001
     await update.message.reply_text(f"⏳ Menganalisa {ticker}…")
     text = target_report(ticker, avg_price=avg)
     await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_review(update, context):  # noqa: ANN001
+    if not _authorized(update):
+        return
+    from src.core.outlook import portfolio_daily_review
+
+    await update.message.reply_text("⏳ Menyusun review portofolio hari ini…")
+    text = portfolio_daily_review()
+    for chunk in [text[i:i + 3800] for i in range(0, len(text), 3800)]:
+        await update.message.reply_text(chunk, parse_mode="HTML")
 
 
 async def cmd_settarget(update, context):  # noqa: ANN001
@@ -162,6 +174,7 @@ def build_application():
     app.add_handler(CommandHandler("plan", cmd_plan))
     app.add_handler(CommandHandler("portfolio", cmd_portfolio))
     app.add_handler(CommandHandler("report", cmd_report))
+    app.add_handler(CommandHandler("review", cmd_review))
     app.add_handler(CommandHandler("target", cmd_target))
     app.add_handler(CommandHandler("settarget", cmd_settarget))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
