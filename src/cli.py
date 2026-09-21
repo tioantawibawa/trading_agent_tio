@@ -39,6 +39,43 @@ def _run_agent(num: int) -> None:
         raise SystemExit(f"Agent tidak dikenal: {num}")
 
 
+def _telegram_chatid() -> None:
+    """Ambil Chat ID dari pesan terbaru ke bot (untuk mengisi
+    TELEGRAM_ALLOWED_CHAT_IDS). Kirim /start ke bot Anda lebih dulu."""
+    import requests
+
+    if not settings.telegram_bot_token:
+        log.error("TELEGRAM_BOT_TOKEN belum diisi di .env")
+        return
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{settings.telegram_bot_token}/getUpdates",
+            timeout=30,
+        )
+        data = r.json()
+    except Exception as exc:  # noqa: BLE001
+        log.error("Gagal menghubungi Telegram: %s", exc)
+        return
+    if not data.get("ok"):
+        log.error("Telegram menolak: %s", data)
+        return
+    seen: set[int] = set()
+    for upd in data.get("result", []):
+        msg = upd.get("message") or upd.get("edited_message") or upd.get("channel_post") or {}
+        chat = msg.get("chat") or {}
+        cid = chat.get("id")
+        if cid and cid not in seen:
+            seen.add(cid)
+            nama = " ".join(filter(None, [chat.get("first_name"), chat.get("last_name")]))
+            log.info("Chat ID: %s | %s | @%s | tipe=%s",
+                     cid, nama or "-", chat.get("username", "-"), chat.get("type"))
+    if not seen:
+        log.info("Belum ada pesan terbaca. Kirim /start ke bot Anda di Telegram, "
+                 "lalu jalankan perintah ini lagi.")
+    else:
+        log.info("Salin Chat ID di atas ke TELEGRAM_ALLOWED_CHAT_IDS di .env.")
+
+
 def _pipeline() -> None:
     """Jalankan alur pagi lengkap sekali (untuk uji end-to-end)."""
     from src.agents import (
@@ -65,6 +102,8 @@ def main() -> None:
     sub.add_parser("pipeline", parents=[common], help="Jalankan Agent 1→4 berurutan sekali")
     sub.add_parser("init-db", parents=[common], help="Inisialisasi skema database")
     sub.add_parser("llm-model", parents=[common], help="Tampilkan model LLM yang terpilih")
+    sub.add_parser("telegram-chatid", parents=[common],
+                   help="Tampilkan Chat ID dari pesan terbaru ke bot Telegram")
 
     ra = sub.add_parser("run-agent", parents=[common], help="Jalankan satu agent")
     ra.add_argument("number", type=int, choices=range(1, 7))
@@ -91,6 +130,8 @@ def main() -> None:
         log.info("Provider: %s", settings.llm_provider)
         log.info("Model teks   : %s", _resolve_model("text") or "(tidak ada / template)")
         log.info("Model vision : %s", _resolve_model("vision") or "(tidak ada / template)")
+    elif args.cmd == "telegram-chatid":
+        _telegram_chatid()
     elif args.cmd == "run-agent":
         _run_agent(args.number)
 

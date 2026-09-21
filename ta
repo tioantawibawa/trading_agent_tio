@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Pembungkus praktis: selalu memakai Python di virtualenv proyek,
+# sehingga Anda tak perlu `source .venv/bin/activate` tiap kali.
+#
+# Contoh:
+#   ./ta run-agent 1
+#   ./ta llm-model
+#   ./ta telegram-chatid
+#   ./ta pipeline --dry-run
+#   ./ta serve
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY="$DIR/.venv/bin/python"
+if [ ! -x "$PY" ]; then
+  echo "❌ Python venv tidak ditemukan di: $PY"
+  echo "   Buat dulu: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+  exit 1
+fi
+cd "$DIR"
+exec "$PY" -m src.cli "$@"
