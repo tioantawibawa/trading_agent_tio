@@ -107,8 +107,24 @@ def t_twelvedata():
     return False, f"{j.get('status','?')}: {j.get('message', str(j)[:120])}"
 
 
+def t_relay():
+    base = os.getenv("YAHOO_RELAY_URL")
+    if not base:
+        return False, "lewati (set YAHOO_RELAY_URL untuk uji relay Cloudflare)"
+    params = {"symbol": f"{TICKER}.JK", "range": "5d", "interval": "1d"}
+    tok = os.getenv("YAHOO_RELAY_TOKEN")
+    if tok:
+        params["token"] = tok
+    r, eng = _get(base.rstrip("/"), params)
+    if r.status_code != 200:
+        return False, f"HTTP {r.status_code}: {r.text[:80]}"
+    n = len(r.json()["chart"]["result"][0].get("timestamp") or [])
+    return n > 0, f"HTTP 200, {n} bar (engine={eng})"
+
+
 def main():
     print(f"Menguji sumber data untuk {TICKER}.JK dari IP VPS ini...\n")
+    test("Yahoo relay (Cloudflare)", t_relay)
     test("Yahoo chart (yahoo_direct)", t_yahoo)
     test("Stooq  suffix .jk", lambda: t_stooq(".jk"))
     test("Stooq  suffix .id", lambda: t_stooq(".id"))

@@ -4,19 +4,31 @@
 
 Pilih via `MARKET_DATA_PROVIDER` di `.env`.
 
-| Provider | Key? | Realtime | Catatan |
-|----------|------|----------|---------|
-| **`yahoo_direct`** (default, gratis) | ❌ | delay ~15 mnt | **Rekomendasi untuk VPS.** Akses endpoint chart Yahoo langsung memakai `curl_cffi` (impersonasi browser) → tahan blokir **HTTP 429** yang menimpa yfinance di IP data-center. Universe `.JK`. |
-| `yfinance` | ❌ | delay ~15 mnt | Library yfinance. Sering kena 429 dari IP VPS. Kini juga memakai sesi `curl_cffi` bila terpasang. |
-| `fmp` | ✅ (gratis) | ~EOD | Financial Modeling Prep. Daftar gratis → `FMP_API_KEY`. Batas ~250 req/hari. Mendukung sufiks `.JK`. |
-| `goapi` | ✅ (bayar) | ✅ | GoAPI.id. Perlu `GOAPI_KEY`. Buat `GoAPIProvider` di `market_data.py`. |
-| `rti` / websocket sekuritas | ✅ (bayar) | ✅ | Perlu langganan/izin. Hormati ToS. |
+| Provider | Key? | IDX free? | Catatan |
+|----------|------|-----------|---------|
+| **`yahoo_relay`** (default) | ❌ | ✅ | **Rekomendasi utama.** Data Yahoo penuh lewat **relay Cloudflare Worker milik Anda** — VPS memanggil Cloudflare (tak diblokir), Cloudflare memanggil Yahoo. Gratis, universe `.JK`. Setup: `scripts/cloudflare-worker.js`. |
+| `fmp` | ✅ (gratis) | tergantung | Financial Modeling Prep. `FMP_API_KEY`. Coba dulu via `diag_data.py` (free tier kadang US-only). |
+| `alphavantage` | ✅ (gratis) | tergantung | Kuota ~25 req/hari. Sufiks `.JKT`. |
+| `twelvedata` | ✅ (gratis) | ❌ | Free tier **tidak** mencakup IDX (butuh plan Pro). |
+| `yahoo_direct` / `yfinance` | ❌ | — | **Diblokir 429** dari IP data-center Tencent. |
+| `stooq` | ❌ | ❌ | Tidak mencakup emiten IDX. |
+| `goapi` / `rti` | ✅ (bayar) | — | Realtime. Perlu langganan. Implementasi menyusul. |
 
-> **Kalau kena 429 terus:** ganti ke `MARKET_DATA_PROVIDER=yahoo_direct` dan
-> pastikan `curl_cffi` terpasang (`pip install curl_cffi`). Ini biasanya
-> menyelesaikan blokir karena permintaan menyamar sebagai browser asli.
-> Jika masih diblokir (IP VPS masuk daftar hitam Yahoo), pakai `fmp`
-> (gratis, butuh key) atau provider berbayar.
+### Kenapa relay Cloudflare?
+
+Diagnostik (`scripts/diag_data.py`) di VPS Tencent menunjukkan **semua sumber
+gratis tanpa key buntu**: Yahoo membalas 429 (blokir IP data-center), Stooq
+tak punya IDX, dan Twelve Data free tidak mencakup IDX. Yahoo sendiri gratis —
+yang diblokir hanyalah IP-nya. Relay Cloudflare Workers (gratis, 100rb
+req/hari) menembusnya tanpa mengorbankan kualitas/kelengkapan data.
+
+**Setup ringkas:**
+1. Buat akun Cloudflare gratis → Workers & Pages → Create Worker.
+2. Tempel isi `scripts/cloudflare-worker.js` → Deploy.
+3. (Disarankan) set variabel rahasia `RELAY_TOKEN` di Worker.
+4. Di `.env`: `MARKET_DATA_PROVIDER=yahoo_relay`, `YAHOO_RELAY_URL=<url worker>`,
+   `YAHOO_RELAY_TOKEN=<rahasia>`.
+5. Uji: `YAHOO_RELAY_URL=<url> YAHOO_RELAY_TOKEN=<rahasia> python scripts/diag_data.py`
 
 > **Konsekuensi delay:** dengan sumber gratis, Agent 5 mengalarm berdasarkan
 > harga tertunda ~15 menit. Untuk sinyal intraday presisi, pakai provider

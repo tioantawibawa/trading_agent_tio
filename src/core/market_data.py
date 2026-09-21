@@ -31,6 +31,26 @@ def to_yahoo(ticker: str) -> str:
     return t if t.endswith(".JK") else f"{t}.JK"
 
 
+def _parse_yahoo_chart(data: dict):
+    """Ubah respons JSON chart Yahoo menjadi DataFrame OHLCV."""
+    import pandas as pd
+
+    result = data["chart"]["result"][0]
+    ts = result.get("timestamp") or []
+    q = result["indicators"]["quote"][0]
+    df = pd.DataFrame(
+        {
+            "Open": q.get("open"),
+            "High": q.get("high"),
+            "Low": q.get("low"),
+            "Close": q.get("close"),
+            "Volume": q.get("volume"),
+        },
+        index=pd.to_datetime(ts, unit="s"),
+    )
+    return df.dropna(subset=["Close"])
+
+
 def _http_get_json(url: str, params: dict, timeout: int = 30):
     """GET JSON dengan browser-impersonation bila curl_cffi ada, else requests."""
     try:
@@ -70,21 +90,7 @@ class YahooDirectProvider:
 
         rng = period if period in _YF_RANGES else "3mo"
         try:
-            data = self._fetch(ticker, rng, interval)
-            result = data["chart"]["result"][0]
-            ts = result.get("timestamp") or []
-            q = result["indicators"]["quote"][0]
-            df = pd.DataFrame(
-                {
-                    "Open": q.get("open"),
-                    "High": q.get("high"),
-                    "Low": q.get("low"),
-                    "Close": q.get("close"),
-                    "Volume": q.get("volume"),
-                },
-                index=pd.to_datetime(ts, unit="s"),
-            )
-            return df.dropna(subset=["Close"])
+            return _parse_yahoo_chart(self._fetch(ticker, rng, interval))
         except Exception as exc:  # noqa: BLE001
             log.warning("yahoo_direct history %s gagal: %s", ticker, exc)
             return pd.DataFrame()
@@ -97,6 +103,48 @@ class YahooDirectProvider:
             return float(price) if price is not None else None
         except Exception as exc:  # noqa: BLE001
             log.debug("yahoo_direct last_price %s gagal: %s", ticker, exc)
+            return None
+
+
+class YahooRelayProvider:
+    """Data Yahoo lewat relay Cloudflare Worker milik Anda sendiri.
+
+    Mengatasi blokir IP: VPS memanggil Worker (tidak diblokir), Worker
+    memanggil Yahoo (IP Cloudflare tidak diblokir Yahoo). Gratis, universe .JK
+    penuh. Set YAHOO_RELAY_URL (dan opsional YAHOO_RELAY_TOKEN) di .env.
+    Skrip worker: scripts/cloudflare-worker.js
+    """
+
+    def _fetch(self, ticker: str, rng: str, interval: str):
+        base = settings.yahoo_relay_url.rstrip("/")
+        params = {"symbol": to_yahoo(ticker), "range": rng, "interval": interval}
+        if settings.yahoo_relay_token:
+            params["token"] = settings.yahoo_relay_token
+        return _http_get_json(base, params)
+
+    def history(self, ticker: str, period: str = "3mo", interval: str = "1d"):
+        import pandas as pd
+
+        if not settings.yahoo_relay_url:
+            log.warning("YAHOO_RELAY_URL kosong — provider yahoo_relay tak bisa dipakai.")
+            return pd.DataFrame()
+        rng = period if period in _YF_RANGES else "3mo"
+        try:
+            return _parse_yahoo_chart(self._fetch(ticker, rng, interval))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("yahoo_relay history %s gagal: %s", ticker, exc)
+            return pd.DataFrame()
+
+    def last_price(self, ticker: str) -> float | None:
+        if not settings.yahoo_relay_url:
+            return None
+        try:
+            data = self._fetch(ticker, "1d", "1m")
+            meta = data["chart"]["result"][0]["meta"]
+            price = meta.get("regularMarketPrice")
+            return float(price) if price is not None else None
+        except Exception as exc:  # noqa: BLE001
+            log.debug("yahoo_relay last_price %s gagal: %s", ticker, exc)
             return None
 
 
@@ -384,6 +432,8 @@ class NullProvider:
 
 def get_provider() -> MarketDataProvider:
     name = settings.market_data_provider.lower()
+    if name in ("yahoo_relay", "relay"):
+        return YahooRelayProvider()
     if name in ("yahoo_direct", "yahoo", "yahoodirect"):
         return YahooDirectProvider()
     if name == "yfinance":
