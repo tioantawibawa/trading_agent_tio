@@ -39,6 +39,97 @@ def _run_agent(num: int) -> None:
         raise SystemExit(f"Agent tidak dikenal: {num}")
 
 
+def _doctor() -> None:
+    """Cek kesehatan semua komponen (data, LLM, Telegram, Email, DB, service)."""
+    import shutil
+    import subprocess
+
+    OK, BAD, WARN = "✅", "❌", "⚠️ "
+    print("\n=== Trading Agent TIO — Health Check ===\n")
+
+    # 1. Database
+    try:
+        dbm.init_db()
+        wl = dbm.get_watchlist()
+        plans = dbm.get_active_plans()
+        port = dbm.get_portfolio()
+        print(f"{OK} Database: {len(wl)} watchlist, {len(plans)} plan aktif, {len(port)} posisi")
+    except Exception as exc:  # noqa: BLE001
+        print(f"{BAD} Database: {exc}")
+
+    # 2. Sumber data pasar
+    try:
+        from src.core.market_data import get_provider
+        price = get_provider().last_price("BBCA")
+        if price:
+            print(f"{OK} Data pasar ({settings.market_data_provider}): BBCA = Rp{int(price)}")
+        else:
+            print(f"{BAD} Data pasar ({settings.market_data_provider}): tidak ada harga "
+                  f"(cek YAHOO_RELAY_URL / provider / jaringan)")
+    except Exception as exc:  # noqa: BLE001
+        print(f"{BAD} Data pasar: {exc}")
+
+    # 3. LLM
+    prov = settings.llm_provider.lower()
+    if prov == "none":
+        print(f"{WARN}LLM: dinonaktifkan (LLM_PROVIDER=none) — memakai template")
+    else:
+        key = settings.openrouter_api_key if prov == "openrouter" else settings.anthropic_api_key
+        if not key:
+            print(f"{BAD} LLM ({prov}): API key kosong")
+        else:
+            try:
+                from src.core.llm import _resolve_model
+                print(f"{OK} LLM ({prov}): teks={_resolve_model('text')} · "
+                      f"vision={_resolve_model('vision')}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"{WARN}LLM ({prov}): key ada, tapi resolve model gagal: {exc}")
+
+    # 4. Telegram
+    if not settings.telegram_bot_token:
+        print(f"{BAD} Telegram: TELEGRAM_BOT_TOKEN kosong")
+    else:
+        try:
+            import requests
+            r = requests.get(
+                f"https://api.telegram.org/bot{settings.telegram_bot_token}/getMe", timeout=15)
+            j = r.json()
+            if j.get("ok"):
+                who = j["result"].get("username")
+                n = len(settings.allowed_chat_ids)
+                mark = OK if n else WARN
+                print(f"{mark}Telegram: bot @{who} aktif, {n} chat ID diizinkan"
+                      + ("" if n else " (isi TELEGRAM_ALLOWED_CHAT_IDS!)"))
+            else:
+                print(f"{BAD} Telegram: token ditolak ({j})")
+        except Exception as exc:  # noqa: BLE001
+            print(f"{BAD} Telegram: {exc}")
+
+    # 5. Email
+    if settings.smtp_user and settings.smtp_password and settings.email_to:
+        print(f"{OK} Email: SMTP {settings.smtp_user} → {settings.email_to} (kredensial ada)")
+    else:
+        print(f"{WARN}Email: kredensial SMTP belum lengkap (Agent 4 tidak kirim email)")
+
+    # 6. Service systemd (mesin Agent 1-5 & bot Agent 6)
+    if shutil.which("systemctl"):
+        for svc in ("trading-agent", "trading-bot"):
+            try:
+                out = subprocess.run(["systemctl", "is-active", svc],
+                                     capture_output=True, text=True, timeout=10)
+                state = out.stdout.strip() or out.stderr.strip()
+                mark = OK if state == "active" else BAD
+                print(f"{mark}Service {svc}: {state}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"{WARN}Service {svc}: {exc}")
+    else:
+        print(f"{WARN}systemctl tidak tersedia — cek service manual")
+
+    print("\nCatatan: 'trading-agent' menjalankan Agent 1-5 (scheduler + monitor),")
+    print("'trading-bot' menjalankan Agent 6 & perintah Telegram. Dry-run flag "
+          f"DRY_RUN={settings.dry_run}.\n")
+
+
 def _telegram_chatid() -> None:
     """Ambil Chat ID dari pesan terbaru ke bot (untuk mengisi
     TELEGRAM_ALLOWED_CHAT_IDS). Kirim /start ke bot Anda lebih dulu."""
@@ -136,6 +227,8 @@ def main() -> None:
     sub.add_parser("bot", parents=[common], help="Jalankan bot Telegram (Agent 5/6)")
     sub.add_parser("pipeline", parents=[common], help="Jalankan Agent 1→4 berurutan sekali")
     sub.add_parser("init-db", parents=[common], help="Inisialisasi skema database")
+    sub.add_parser("doctor", parents=[common], help="Cek kesehatan semua komponen/agent")
+    sub.add_parser("status", parents=[common], help="Alias 'doctor'")
     sub.add_parser("llm-model", parents=[common], help="Tampilkan model LLM yang terpilih")
     sub.add_parser("telegram-chatid", parents=[common],
                    help="Tampilkan Chat ID dari pesan terbaru ke bot Telegram")
@@ -184,6 +277,8 @@ def main() -> None:
         log.info("Provider: %s", settings.llm_provider)
         log.info("Model teks   : %s", _resolve_model("text") or "(tidak ada / template)")
         log.info("Model vision : %s", _resolve_model("vision") or "(tidak ada / template)")
+    elif args.cmd in ("doctor", "status"):
+        _doctor()
     elif args.cmd == "telegram-chatid":
         _telegram_chatid()
     elif args.cmd == "test-vision":
