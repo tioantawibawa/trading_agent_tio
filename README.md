@@ -20,7 +20,7 @@ berbasis loop mandiri).
 | 2 | **Morning Analyst** (`agent2_analyst`) | Screening saham potensial dari snapshot 10 menit pertama | 09.10 WIB |
 | 3 | **Quant Planner** (`agent3_quant`) | Hitung Entry / TP / SL / RRR (deterministik, bukan LLM) | 09.10 WIB |
 | 4 | **Executive Reporter** (`agent4_reporter`) | Rangkum jadi *Actionable Trade Plan* & kirim email | 09.15 WIB |
-| 5 | **Realtime Monitor** (`agent5_monitor`) | Pantau harga live → alert Telegram (BUY/TP/CUT LOSS) | Jam bursa |
+| 5 | **Realtime Monitor** (`agent5_monitor`) | Pantau harga live → alert Telegram (BUY/TP/CUT LOSS) + **early warning spike** | Jam bursa |
 | 6 | **Portfolio Vision** (`agent6_portfolio`) | Baca screenshot portofolio via Telegram (Vision LLM) | On-demand |
 
 **Perintah Telegram:** `/plan` (rencana hari ini), `/portfolio` (ringkasan),

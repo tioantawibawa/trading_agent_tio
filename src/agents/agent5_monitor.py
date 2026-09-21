@@ -4,6 +4,9 @@ Berjalan selama jam bursa. Memantau harga saham pada trade plan aktif hari ini
 serta posisi portofolio terbuka, lalu mengirim alert Telegram saat harga
 menyentuh level Entry / Take Profit / Stop Loss.
 
+Juga menjalankan EARLY WARNING: mendeteksi lonjakan harga mendadak (spike) pada
+watchlist/portofolio dan mengirim notifikasi proaktif secara otomatis.
+
 Catatan: dengan data gratis (yfinance) harga delay ~15 menit — cocok untuk
 swing/breakout, bukan scalping. Ganti provider ke GoAPI/RTI untuk realtime.
 """
@@ -80,6 +83,67 @@ async def _evaluate_position(pos: dict[str, Any], price: float) -> None:
         dbm.log_alert(tk, "CUTLOSS", price, msg)
 
 
+# Referensi harga per ticker untuk deteksi lonjakan (bertahan antar-poll dalam
+# proses yang sama). {ticker: (epoch_detik, harga)}
+_spike_ref: dict[str, tuple[float, float]] = {}
+
+
+def _context_notes(tk: str, price: float) -> tuple[str, float | None]:
+    """Catatan konteks untuk alert spike: gain harian & apakah ramai berita."""
+    daily = dbm.get_daily_data(tk) or {}
+    prev_close = daily.get("prev_close")
+    day_gain = ((price - prev_close) / prev_close * 100) if prev_close else None
+    notes = []
+    volumes = daily.get("volumes") or []
+    if len(volumes) >= settings.volume_lookback_days + 1:
+        avg = sum(volumes[-(settings.volume_lookback_days + 1):-1]) / settings.volume_lookback_days
+        if avg and volumes[-1] >= avg * settings.volume_spike_multiplier:
+            notes.append(f"volume {volumes[-1]/avg:.1f}x rata-rata")
+    sentiment = dbm.get_sentiment() or {}
+    if tk in (sentiment.get("top_mentions") or {}):
+        notes.append("ramai diberitakan")
+    return ("; ".join(notes), day_gain)
+
+
+async def _scan_spikes(provider, tickers: set[str]) -> None:
+    """Early warning: deteksi kenaikan harga mendadak & kirim alert proaktif."""
+    if not settings.early_warning:
+        return
+    import time
+
+    now = time.time()
+    window_s = settings.early_warning_window_min * 60
+    for tk in tickers:
+        price = provider.last_price(tk)
+        if price is None or price <= 0:
+            continue
+        ref = _spike_ref.get(tk)
+        if ref is None:
+            _spike_ref[tk] = (now, price)
+            continue
+        ref_t, ref_p = ref
+        if now - ref_t < window_s:
+            continue  # jendela belum penuh — tahan referensi
+        pct = (price - ref_p) / ref_p * 100 if ref_p else 0.0
+        _spike_ref[tk] = (now, price)  # geser jendela
+        if pct < settings.early_warning_pct:
+            continue
+        # Cooldown agar tidak spam.
+        last = dbm.minutes_since_last_alert(tk, "SPIKE")
+        if last is not None and last < settings.early_warning_cooldown_min:
+            continue
+        notes, day_gain = _context_notes(tk, price)
+        extra = f" | hari ini {day_gain:+.1f}%" if day_gain is not None else ""
+        if notes:
+            extra += f" | {notes}"
+        mins = int((now - ref_t) / 60)
+        msg = (f"🚨 <b>[EARLY WARNING — SPIKE]</b> {tk} melonjak "
+               f"<b>+{pct:.1f}%</b> dalam ~{mins} menit (now {_rp(price)}){extra}. "
+               f"Potensi momentum — cek peluang.")
+        await send_telegram(msg)
+        dbm.log_alert(tk, "SPIKE", price, msg)
+
+
 async def poll_once() -> int:
     """Satu siklus polling. Kembalikan jumlah ticker yang dievaluasi."""
     if not idx.is_market_open(_HOURS):
@@ -89,6 +153,7 @@ async def poll_once() -> int:
     provider = get_provider()
     plans = {p["ticker"]: p for p in dbm.get_active_plans() if p.get("stage") == "planned"}
     positions = {p["ticker"]: p for p in dbm.get_portfolio()}
+    watch = set(dbm.get_watchlist())
     tickers = set(plans) | set(positions)
 
     for tk in tickers:
@@ -99,6 +164,9 @@ async def poll_once() -> int:
             await _evaluate_plan(tk, plans[tk], price)
         if tk in positions:
             await _evaluate_position(positions[tk], price)
+
+    # Early warning dipindai untuk watchlist + plan + posisi.
+    await _scan_spikes(provider, watch | set(plans) | set(positions))
     return len(tickers)
 
 

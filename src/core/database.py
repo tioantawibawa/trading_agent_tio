@@ -253,6 +253,23 @@ def log_alert(ticker: str, kind: str, price: float | None, message: str) -> None
         )
 
 
+def minutes_since_last_alert(ticker: str, kind: str) -> float | None:
+    """Menit sejak alert jenis `kind` terakhir untuk `ticker`. None bila belum ada."""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT created_at FROM alerts WHERE ticker=? AND kind=? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (ticker.upper(), kind),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        t = datetime.fromisoformat(row["created_at"])
+        return (datetime.utcnow() - t).total_seconds() / 60
+    except (ValueError, TypeError):
+        return None
+
+
 def already_alerted_today(ticker: str, kind: str) -> bool:
     """Cegah spam: cek apakah alert jenis tertentu sudah dikirim hari ini."""
     start = _today() + "T00:00:00"

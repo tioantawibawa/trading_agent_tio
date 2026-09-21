@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     session2_close: str = "15:50"
     monitor_poll_seconds: int = 60
 
+    # Early warning — deteksi lonjakan (spike) mendadak
+    early_warning: bool = True
+    early_warning_pct: float = 3.0          # kenaikan minimal (%) untuk memicu
+    early_warning_window_min: int = 10      # dalam jendela ~sekian menit
+    early_warning_cooldown_min: int = 30    # jeda minimal antar-alert per saham
+
     # --- Derived helpers ---
     @property
     def watchlist_tickers(self) -> list[str]:
