@@ -78,6 +78,87 @@ def _anthropic_vision(b64: str, prompt: str, media_type: str) -> str | None:
 # --------------------------------------------------------------------------
 # OpenRouter (format OpenAI chat.completions)
 # --------------------------------------------------------------------------
+_MODEL_CACHE: dict[str, str] = {}
+# Kandidat cadangan (umumnya ada sebagai gratis) bila auto-deteksi gagal.
+_FALLBACK_TEXT = ["deepseek/deepseek-chat-v3.1:free", "google/gemini-2.0-flash-exp:free"]
+_FALLBACK_VISION = ["google/gemini-2.0-flash-exp:free"]
+
+
+def _fetch_openrouter_models() -> list[dict]:
+    import requests
+
+    r = requests.get(OPENROUTER_BASE_URL + "/models", timeout=30)
+    r.raise_for_status()
+    return r.json().get("data", [])
+
+
+def _is_free(m: dict) -> bool:
+    p = m.get("pricing") or {}
+    try:
+        return float(p.get("prompt", 1)) == 0 and float(p.get("completion", 1)) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _supports_image(m: dict) -> bool:
+    arch = m.get("architecture") or {}
+    mods = arch.get("input_modalities") or arch.get("modality") or ""
+    return "image" in (mods if isinstance(mods, list) else [mods]) or "image" in str(mods)
+
+
+def _pick_free_model(kind: str) -> str | None:
+    """Pilih otomatis model GRATIS terbaik dari OpenRouter.
+
+    kind: 'text' | 'vision'. Hasil di-cache per proses. Kembalikan None bila
+    tak ada model gratis yang cocok (agent lalu memakai template).
+    """
+    if kind in _MODEL_CACHE:
+        return _MODEL_CACHE[kind]
+    try:
+        models = _fetch_openrouter_models()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Gagal ambil daftar model OpenRouter: %s", exc)
+        models = []
+
+    free = [m for m in models if _is_free(m)]
+    if kind == "vision":
+        free = [m for m in free if _supports_image(m)]
+
+    # Urutkan: prefer keluarga populer & stabil, lalu context length terbesar.
+    pref = ("gemini", "llama", "qwen", "deepseek", "mistral", "glm")
+    def _score(m: dict):
+        idl = m.get("id", "").lower()
+        fam = next((len(pref) - i for i, k in enumerate(pref) if k in idl), 0)
+        return (fam, m.get("context_length") or 0)
+
+    free.sort(key=_score, reverse=True)
+    chosen = None
+    if free:
+        chosen = free[0]["id"]
+    else:
+        # Coba kandidat cadangan yang memang ada di daftar (bila terambil).
+        ids = {m.get("id") for m in models}
+        for cand in (_FALLBACK_VISION if kind == "vision" else _FALLBACK_TEXT):
+            if not models or cand in ids:
+                chosen = cand
+                break
+
+    if chosen:
+        _MODEL_CACHE[kind] = chosen
+        log.info("LLM auto-pilih model gratis (%s): %s", kind, chosen)
+    else:
+        log.warning("Tidak menemukan model gratis untuk %s.", kind)
+    return chosen
+
+
+def _resolve_model(kind: str) -> str | None:
+    """Kembalikan nama model: pakai nilai .env, atau auto-pilih bila 'auto'/kosong."""
+    configured = settings.llm_vision_model if kind == "vision" else settings.llm_model
+    if configured and configured.strip().lower() != "auto":
+        return configured
+    return _pick_free_model(kind)
+
+
 def _openrouter_client():
     if not settings.openrouter_api_key:
         log.warning("OPENROUTER_API_KEY kosong — langkah LLM dilewati.")
@@ -100,8 +181,11 @@ def _openrouter_complete(prompt: str, system: str, max_tokens: int) -> str | Non
     client = _openrouter_client()
     if client is None:
         return None
+    model = _resolve_model("text")
+    if not model:
+        return None
     resp = client.chat.completions.create(
-        model=settings.llm_model,
+        model=model,
         max_tokens=max_tokens,
         messages=[
             {"role": "system", "content": system},
@@ -115,9 +199,12 @@ def _openrouter_vision(b64: str, prompt: str, media_type: str) -> str | None:
     client = _openrouter_client()
     if client is None:
         return None
+    model = _resolve_model("vision")
+    if not model:
+        return None
     data_url = f"data:{media_type};base64,{b64}"
     resp = client.chat.completions.create(
-        model=settings.llm_vision_model,
+        model=model,
         max_tokens=1500,
         messages=[{
             "role": "user",

@@ -64,6 +64,7 @@ def main() -> None:
     sub.add_parser("bot", parents=[common], help="Jalankan bot Telegram (Agent 5/6)")
     sub.add_parser("pipeline", parents=[common], help="Jalankan Agent 1→4 berurutan sekali")
     sub.add_parser("init-db", parents=[common], help="Inisialisasi skema database")
+    sub.add_parser("llm-model", parents=[common], help="Tampilkan model LLM yang terpilih")
 
     ra = sub.add_parser("run-agent", parents=[common], help="Jalankan satu agent")
     ra.add_argument("number", type=int, choices=range(1, 7))
@@ -85,6 +86,11 @@ def main() -> None:
     elif args.cmd == "init-db":
         dbm.init_db()
         log.info("Skema DB dibuat di %s", settings.db_path)
+    elif args.cmd == "llm-model":
+        from src.core.llm import _resolve_model
+        log.info("Provider: %s", settings.llm_provider)
+        log.info("Model teks   : %s", _resolve_model("text") or "(tidak ada / template)")
+        log.info("Model vision : %s", _resolve_model("vision") or "(tidak ada / template)")
     elif args.cmd == "run-agent":
         _run_agent(args.number)
 

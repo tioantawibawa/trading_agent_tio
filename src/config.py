@@ -45,8 +45,8 @@ class Settings(BaseSettings):
 
     # LLM
     llm_provider: str = "anthropic"
-    llm_model: str = "claude-haiku-4-5-20251001"
-    llm_vision_model: str = "claude-haiku-4-5-20251001"
+    llm_model: str = "auto"          # 'auto' = pilih model gratis (OpenRouter)
+    llm_vision_model: str = "auto"
     anthropic_api_key: str = ""
     openrouter_api_key: str = ""
 
