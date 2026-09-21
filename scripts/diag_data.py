@@ -5,10 +5,15 @@ Karena tiap penyedia bisa berbeda perlakuan terhadap IP VPS Anda (mis. Yahoo
 memblokir IP data-center Tencent), skrip ini menguji beberapa sumber GRATIS
 langsung dari VPS dan melaporkan mana yang mengembalikan data IDX.
 
-Pakai:
-    python scripts/diag_data.py                 # uji sumber tanpa key
-    FMP_API_KEY=xxx python scripts/diag_data.py  # sertakan uji FMP
-    ALPHAVANTAGE_KEY=xxx python scripts/diag_data.py
+Pakai (gabungkan key yang Anda punya — signup gratis, instan):
+    python scripts/diag_data.py
+    TWELVEDATA_KEY=xxx python scripts/diag_data.py
+    FMP_API_KEY=xxx ALPHAVANTAGE_KEY=yyy TWELVEDATA_KEY=zzz python scripts/diag_data.py
+
+Dapatkan key gratis:
+    Twelve Data   -> https://twelvedata.com/pricing  (Basic/Free, 800 req/hari)
+    Alpha Vantage -> https://www.alphavantage.co/support/#api-key
+    FMP           -> https://site.financialmodelingprep.com/developer/docs
 
 Tidak butuh paket proyek; hanya 'requests' (dan 'curl_cffi' bila ada).
 """
@@ -86,7 +91,20 @@ def t_alpha():
     series = j.get("Time Series (Daily)")
     if series:
         return True, f"HTTP 200, {len(series)} bar (engine={eng})"
-    return False, f"tak ada data: {str(j)[:100]}"
+    return False, f"tak ada data: {str(j)[:120]}"
+
+
+def t_twelvedata():
+    key = os.getenv("TWELVEDATA_KEY")
+    if not key:
+        return False, "lewati (set TWELVEDATA_KEY untuk uji)"
+    url = "https://api.twelvedata.com/time_series"
+    r, eng = _get(url, {"symbol": TICKER, "exchange": "IDX", "interval": "1day",
+                        "outputsize": 5, "apikey": key})
+    j = r.json()
+    if j.get("status") == "ok" and j.get("values"):
+        return True, f"HTTP 200, {len(j['values'])} bar (engine={eng})"
+    return False, f"{j.get('status','?')}: {j.get('message', str(j)[:120])}"
 
 
 def main():
@@ -95,6 +113,7 @@ def main():
     test("Stooq  suffix .jk", lambda: t_stooq(".jk"))
     test("Stooq  suffix .id", lambda: t_stooq(".id"))
     test("Stooq  tanpa suffix", lambda: t_stooq(""))
+    test("Twelve Data (exchange=IDX)", t_twelvedata)
     test("FMP (financialmodelingprep)", t_fmp)
     test("Alpha Vantage", t_alpha)
     print("\nCatatan: yang '✅ TEMBUS' bisa dipakai. Set MARKET_DATA_PROVIDER di .env "

@@ -34,10 +34,12 @@ class Settings(BaseSettings):
     watchlist: str = "BBCA,BBRI,TLKM,ASII,ANTM"
 
     # Sumber data
-    market_data_provider: str = "yahoo_direct"
+    market_data_provider: str = "twelvedata"
     goapi_key: str = ""
     rti_token: str = ""
     fmp_api_key: str = ""
+    twelvedata_key: str = ""
+    alphavantage_key: str = ""
 
     # LLM
     llm_provider: str = "anthropic"

@@ -212,6 +212,114 @@ class YFinanceProvider:
         return self._retry(_fetch, "last_price", ticker)
 
 
+class TwelveDataProvider:
+    """Twelve Data — gratis dengan API key (TWELVEDATA_KEY).
+
+    Free tier: 800 request/hari, 8/menit. Mendukung bursa IDX (exchange=IDX),
+    dan umumnya dapat diakses dari IP VPS (tidak seperti Yahoo). REKOMENDASI
+    utama bila sumber tanpa-key diblokir.
+    """
+
+    BASE = "https://api.twelvedata.com"
+    _INTERVAL = {"1d": "1day", "1wk": "1week", "15m": "15min", "5m": "5min", "1m": "1min"}
+
+    def _code(self, ticker: str) -> str:
+        return ticker.upper().replace(".JK", "")
+
+    def history(self, ticker: str, period: str = "3mo", interval: str = "1d"):
+        import pandas as pd
+
+        if not settings.twelvedata_key:
+            log.warning("TWELVEDATA_KEY kosong — provider twelvedata tidak bisa dipakai.")
+            return pd.DataFrame()
+        n = {"5d": 5, "1mo": 25, "3mo": 70, "6mo": 130, "1y": 260}.get(period, 70)
+        params = {
+            "symbol": self._code(ticker), "exchange": "IDX",
+            "interval": self._INTERVAL.get(interval, "1day"),
+            "outputsize": n, "order": "ASC", "apikey": settings.twelvedata_key,
+        }
+        try:
+            j = _http_get_json(f"{self.BASE}/time_series", params)
+            if j.get("status") != "ok" or not j.get("values"):
+                log.warning("twelvedata %s: %s", ticker, j.get("message", j.get("status")))
+                return pd.DataFrame()
+            df = pd.DataFrame(j["values"])
+            df.index = pd.to_datetime(df["datetime"])
+            for col in ("open", "high", "low", "close", "volume"):
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+            return df.rename(columns={
+                "open": "Open", "high": "High", "low": "Low",
+                "close": "Close", "volume": "Volume",
+            })[["Open", "High", "Low", "Close", "Volume"]]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("twelvedata history %s gagal: %s", ticker, exc)
+            return pd.DataFrame()
+
+    def last_price(self, ticker: str) -> float | None:
+        if not settings.twelvedata_key:
+            return None
+        try:
+            j = _http_get_json(f"{self.BASE}/price", {
+                "symbol": self._code(ticker), "exchange": "IDX",
+                "apikey": settings.twelvedata_key,
+            })
+            price = j.get("price")
+            return float(price) if price else None
+        except Exception as exc:  # noqa: BLE001
+            log.debug("twelvedata last_price %s gagal: %s", ticker, exc)
+            return None
+
+
+class AlphaVantageProvider:
+    """Alpha Vantage — gratis dengan API key (ALPHAVANTAGE_KEY).
+
+    Kuota kecil (mis. 25 request/hari). Sufiks Jakarta: .JKT. Cadangan.
+    """
+
+    BASE = "https://www.alphavantage.co/query"
+
+    def _symbol(self, ticker: str) -> str:
+        return ticker.upper().replace(".JK", "") + ".JKT"
+
+    def history(self, ticker: str, period: str = "3mo", interval: str = "1d"):
+        import pandas as pd
+
+        if not settings.alphavantage_key:
+            log.warning("ALPHAVANTAGE_KEY kosong — provider alphavantage tidak bisa dipakai.")
+            return pd.DataFrame()
+        try:
+            j = _http_get_json(self.BASE, {
+                "function": "TIME_SERIES_DAILY", "symbol": self._symbol(ticker),
+                "outputsize": "compact", "apikey": settings.alphavantage_key,
+            })
+            series = j.get("Time Series (Daily)")
+            if not series:
+                log.warning("alphavantage %s: %s", ticker, str(j)[:120])
+                return pd.DataFrame()
+            df = pd.DataFrame(series).T.rename(columns={
+                "1. open": "Open", "2. high": "High", "3. low": "Low",
+                "4. close": "Close", "5. volume": "Volume",
+            })
+            df.index = pd.to_datetime(df.index)
+            df = df.sort_index()
+            for c in ["Open", "High", "Low", "Close", "Volume"]:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+            return df[["Open", "High", "Low", "Close", "Volume"]]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("alphavantage history %s gagal: %s", ticker, exc)
+            return pd.DataFrame()
+
+    def last_price(self, ticker: str) -> float | None:
+        df = self.history(ticker, period="5d")
+        if df is None or len(df) == 0:
+            return None
+        try:
+            return float(df["Close"].iloc[-1])
+        except Exception:  # noqa: BLE001
+            return None
+
+
 class StooqProvider:
     """Stooq.com — CSV harian gratis, tanpa API key, ramah IP data-center.
 
@@ -284,6 +392,10 @@ def get_provider() -> MarketDataProvider:
         return FMPProvider()
     if name == "stooq":
         return StooqProvider()
+    if name in ("twelvedata", "twelve_data", "td"):
+        return TwelveDataProvider()
+    if name in ("alphavantage", "alpha_vantage", "av"):
+        return AlphaVantageProvider()
     # TODO: tambahkan GoAPIProvider / RTIProvider di sini untuk realtime.
     log.warning("Provider '%s' belum diimplementasikan — memakai NullProvider.", name)
     return NullProvider()
