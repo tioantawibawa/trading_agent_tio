@@ -34,22 +34,49 @@ skema berikut, tanpa teks lain:
   ]
 }
 
-Aturan: gunakan angka tanpa pemisah ribuan (1450 bukan 1.450). Jika sebuah
-nilai tidak terbaca, isi null. Ticker adalah kode 4 huruf saham Indonesia.
+Aturan PENTING:
+- Balas HANYA objek JSON, tanpa teks pengantar, tanpa blok kode markdown (```).
+- Angka TANPA pemisah ribuan dan tanpa simbol mata uang: tulis 162197000, bukan
+  "Rp162,197,000" atau 162.197.000.
+- floating_pl_rp negatif ditulis dengan minus, mis -47847530.
+- Jika sebuah nilai tidak terbaca, isi null. Ticker adalah kode 4 huruf.
 """
+
+
+def _sanitize_json(s: str) -> str:
+    """Bersihkan JSON dari kesalahan umum model: fence, pemisah ribuan, koma
+    berlebih, simbol mata uang."""
+    s = s.strip()
+    # Hapus fence ```json ... ```
+    s = re.sub(r"^```(?:json)?", "", s).strip()
+    s = re.sub(r"```$", "", s).strip()
+    # Ambil dari '{' pertama sampai '}' terakhir.
+    start, end = s.find("{"), s.rfind("}")
+    if start != -1 and end != -1:
+        s = s[start:end + 1]
+    # Hapus simbol mata uang & spasi ribuan.
+    s = s.replace("Rp", "").replace("IDR", "")
+    # Hapus pemisah ribuan: koma/titik di antara digit (grup 3 angka).
+    s = re.sub(r"(?<=\d)[.,](?=\d{3}(?:\D|$))", "", s)
+    # Hapus koma sebelum penutup } atau ].
+    s = re.sub(r",\s*([}\]])", r"\1", s)
+    return s
 
 
 def _parse_json(text: str) -> dict[str, Any] | None:
     if not text:
         return None
-    m = re.search(r"\{.*\}", text, re.DOTALL)
-    if not m:
-        return None
-    try:
-        return json.loads(m.group(0))
-    except json.JSONDecodeError:
-        log.warning("Output vision bukan JSON valid.")
-        return None
+    # Coba langsung, lalu versi yang sudah dibersihkan.
+    for candidate in (text, _sanitize_json(text)):
+        m = re.search(r"\{.*\}", candidate, re.DOTALL)
+        if not m:
+            continue
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            continue
+    log.warning("Output vision tak bisa di-parse jadi JSON.")
+    return None
 
 
 def _summarize(data: dict[str, Any]) -> str:
