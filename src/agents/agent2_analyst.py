@@ -30,8 +30,10 @@ def _score_candidate(tk: str, daily: dict[str, Any], mentions: dict[str, int]) -
         return None
 
     spike = volume_spike(volumes, settings.volume_spike_multiplier, settings.volume_lookback_days)
-    # Momentum sederhana: perubahan harga bar terakhir vs sebelumnya.
-    momentum = (closes[-1] - closes[-2]) / closes[-2] if closes[-2] else 0.0
+    # Momentum: harga terkini (intraday bila ada) vs penutupan hari sebelumnya.
+    last = daily.get("intraday_last") or closes[-1]
+    ref = closes[-2]  # penutupan harian sebelum bar hari ini
+    momentum = (last - ref) / ref if ref else 0.0
     mention_score = mentions.get(tk.upper(), 0)
 
     score = 0.0
@@ -54,13 +56,18 @@ def _score_candidate(tk: str, daily: dict[str, Any], mentions: dict[str, int]) -
         "volume_ratio": spike["ratio"],
         "momentum_pct": round(momentum * 100, 2),
         "mentions": mention_score,
-        "last_price": closes[-1],
+        "last_price": last,
         "reasons": reasons,
     }
 
 
 def _refresh_intraday(tickers: list[str]) -> None:
-    """Perbarui bar terakhir dengan snapshot intraday (best-effort)."""
+    """Simpan harga intraday terakhir sebagai field terpisah.
+
+    PENTING: jangan menyisipkan bar 15-menit ke deret harian (closes/volumes),
+    karena akan merusak deteksi volume-spike & momentum (volume 15m jauh lebih
+    kecil dari rata-rata harian). Cukup simpan `intraday_last` untuk Agent 3.
+    """
     provider = get_provider()
     for tk in tickers:
         try:
@@ -68,10 +75,7 @@ def _refresh_intraday(tickers: list[str]) -> None:
             if df is None or len(df) == 0:
                 continue
             daily = dbm.get_daily_data(tk) or {}
-            last = df.iloc[-1]
-            daily.setdefault("closes", []).append(float(last["Close"]))
-            daily.setdefault("volumes", []).append(float(last["Volume"]))
-            daily["intraday_last"] = float(last["Close"])
+            daily["intraday_last"] = float(df["Close"].iloc[-1])
             dbm.save_daily_data(tk, daily)
         except Exception as exc:  # noqa: BLE001
             log.debug("Refresh intraday %s gagal: %s", tk, exc)
@@ -93,7 +97,10 @@ def run(dry_run: bool | None = None) -> list[dict[str, Any]]:
             continue
         cand = _score_candidate(tk, daily, mentions)
         if cand:
+            log.info("  %s: skor %.2f (%s)", tk, cand["score"], ", ".join(cand["reasons"]))
             scored.append(cand)
+        else:
+            log.info("  %s: tidak lolos kriteria (tak ada spike/momentum/berita).", tk)
 
     scored.sort(key=lambda c: c["score"], reverse=True)
     shortlist = scored[: settings.max_candidates]
