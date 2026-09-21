@@ -51,14 +51,31 @@ async def _evaluate_plan(tk: str, plan: dict[str, Any], price: float) -> None:
 
 
 async def _evaluate_position(pos: dict[str, Any], price: float) -> None:
-    """Alert untuk posisi portofolio terbuka berdasarkan batas P/L default."""
+    """Alert posisi portofolio: TP saat mencapai target profit, CUTLOSS saat
+    menyentuh stop. Selalu aktif selama monitor jalan (jam bursa)."""
     tk = pos["ticker"]
     avg = pos.get("avg_price")
-    if not avg:
+    target = pos.get("target_price")
+    stop = pos.get("stop_price")
+    change = ((price - avg) / avg * 100) if avg else None
+
+    # 1) Target profit tercapai.
+    if target and price >= target and not dbm.already_alerted_today(tk, "TP"):
+        pl = f" (floating {change:+.1f}%)" if change is not None else ""
+        msg = (f"🟢 <b>[TARGET PROFIT — POSISI]</b> {tk} menyentuh target {_rp(target)} "
+               f"(now {_rp(price)}){pl}. Pertimbangkan realisasi profit / trailing stop.")
+        await send_telegram(msg)
+        dbm.log_alert(tk, "TP", price, msg)
         return
-    change = (price - avg) / avg * 100
-    if change <= -settings.max_stoploss_pct and not dbm.already_alerted_today(tk, "CUTLOSS"):
-        msg = f"🔴 <b>[CUT LOSS — POSISI]</b> {tk} floating {change:.1f}% (avg {_rp(avg)}, now {_rp(price)})."
+
+    # 2) Stop / cut-loss tersentuh (pakai stop_price bila ada, else batas persen).
+    hit_stop = (stop and price <= stop) or (
+        change is not None and change <= -settings.max_stoploss_pct)
+    if hit_stop and not dbm.already_alerted_today(tk, "CUTLOSS"):
+        ref = _rp(stop) if stop else f"{-settings.max_stoploss_pct:.0f}%"
+        pl = f" (floating {change:+.1f}%)" if change is not None else ""
+        msg = (f"🔴 <b>[CUT LOSS — POSISI]</b> {tk} menembus batas {ref} "
+               f"(now {_rp(price)}){pl}. Disiplin eksekusi keluar.")
         await send_telegram(msg)
         dbm.log_alert(tk, "CUTLOSS", price, msg)
 

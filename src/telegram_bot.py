@@ -37,7 +37,8 @@ async def cmd_start(update, context):  # noqa: ANN001
         "/portfolio — ringkasan portofolio\n"
         "/report — prospek 7 hari untuk semua saham di portofolio\n"
         "/target KODE — prospek 7 hari satu saham (mis. /target BBCA)\n"
-        "Kirim screenshot portofolio untuk dianalisa."
+        "/settarget KODE TP SL — set target profit & cut loss (alert otomatis)\n"
+        "Kirim screenshot portofolio untuk dianalisa (target/stop dihitung otomatis)."
     )
 
 
@@ -93,6 +94,32 @@ async def cmd_target(update, context):  # noqa: ANN001
     await update.message.reply_text(text, parse_mode="HTML")
 
 
+async def cmd_settarget(update, context):  # noqa: ANN001
+    if not _authorized(update):
+        return
+    args = context.args if hasattr(context, "args") else []
+    if len(args) < 3:
+        await update.message.reply_text(
+            "Format: /settarget KODE TARGET STOP\n"
+            "Contoh: /settarget ANTM 3600 3100")
+        return
+    tk = args[0].upper()
+    try:
+        target = float(args[1].replace(".", "").replace(",", ""))
+        stop = float(args[2].replace(".", "").replace(",", ""))
+    except ValueError:
+        await update.message.reply_text("TARGET dan STOP harus angka. Contoh: /settarget ANTM 3600 3100")
+        return
+    ok = dbm.set_position_targets(tk, target, stop)
+    if ok:
+        await update.message.reply_text(
+            f"✅ {tk}: target Rp{int(target)} / stop Rp{int(stop)} tersimpan. "
+            f"Notifikasi otomatis aktif saat harga menyentuhnya.")
+    else:
+        await update.message.reply_text(
+            f"⚠️ {tk} tidak ada di portofolio. Kirim screenshot portofolio dulu.")
+
+
 async def cmd_report(update, context):  # noqa: ANN001
     if not _authorized(update):
         return
@@ -136,6 +163,7 @@ def build_application():
     app.add_handler(CommandHandler("portfolio", cmd_portfolio))
     app.add_handler(CommandHandler("report", cmd_report))
     app.add_handler(CommandHandler("target", cmd_target))
+    app.add_handler(CommandHandler("settarget", cmd_settarget))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     return app
 

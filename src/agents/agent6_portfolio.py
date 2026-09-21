@@ -102,14 +102,36 @@ def analyze_screenshot(image_bytes: bytes, media_type: str = "image/png") -> dic
             "Coba kirim ulang screenshot yang lebih jelas.",
         }
 
-    # Perbarui DB portofolio.
+    # Perbarui DB portofolio, sekaligus hitung target profit & stop cut-loss
+    # (deterministik, dari analisa 7-hari) agar Agent 5 bisa memantau otomatis.
+    from src.core.outlook import weekly_outlook
+
     dbm.clear_portfolio()
     for p in data.get("positions", []):
         if not p.get("ticker"):
             continue
+        target = stop = None
+        try:
+            o = weekly_outlook(p["ticker"], avg_price=p.get("avg_price"))
+            if o:
+                target, stop = o.get("target"), o.get("stop")
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Gagal hitung target %s: %s", p["ticker"], exc)
         dbm.upsert_position(
-            p["ticker"], p.get("lots"), p.get("avg_price"), p.get("last_price"), payload=p
+            p["ticker"], p.get("lots"), p.get("avg_price"), p.get("last_price"),
+            target_price=target, stop_price=stop, payload=p,
         )
     summary = _summarize(data)
+    # Tambahkan target/stop yang terpasang (untuk alert otomatis Agent 5).
+    tlines = ["\n🎯 <b>Target & Stop (auto, alert aktif)</b>"]
+    for pos in dbm.get_portfolio():
+        if pos.get("target_price") or pos.get("stop_price"):
+            tlines.append(
+                f"• {pos['ticker']}: TP Rp{int(pos['target_price']) if pos.get('target_price') else '-'} "
+                f"/ SL Rp{int(pos['stop_price']) if pos.get('stop_price') else '-'}"
+            )
+    if len(tlines) > 1:
+        summary += "\n" + "\n".join(tlines)
+        summary += "\n\n<i>Anda akan menerima notifikasi otomatis saat harga menyentuh TP/SL. Ubah manual: /settarget KODE TP SL</i>"
     log.info("Agent 6: %d posisi diperbarui dari screenshot.", len(data.get("positions", [])))
     return {"data": data, "summary": summary}

@@ -46,12 +46,14 @@ CREATE TABLE IF NOT EXISTS trade_plan (
 );
 
 CREATE TABLE IF NOT EXISTS portfolio (
-    ticker      TEXT PRIMARY KEY,
-    lots        INTEGER,
-    avg_price   REAL,
-    last_price  REAL,
-    updated_at  TEXT NOT NULL,
-    payload     TEXT                    -- JSON mentah hasil ekstraksi
+    ticker       TEXT PRIMARY KEY,
+    lots         INTEGER,
+    avg_price    REAL,
+    last_price   REAL,
+    target_price REAL,                  -- target profit (alert TP)
+    stop_price   REAL,                  -- harga cut loss (alert CUTLOSS)
+    updated_at   TEXT NOT NULL,
+    payload      TEXT                    -- JSON mentah hasil ekstraksi
 );
 
 CREATE TABLE IF NOT EXISTS alerts (
@@ -84,9 +86,18 @@ def db() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Migrasi ringan: tambah kolom baru pada DB lama (idempoten)."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(portfolio)").fetchall()}
+    for col in ("target_price", "stop_price"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE portfolio ADD COLUMN {col} REAL")
+
+
 def init_db() -> None:
     with db() as conn:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
 
 
 def _today() -> str:
@@ -193,18 +204,33 @@ def upsert_position(
     lots: int | None,
     avg_price: float | None,
     last_price: float | None,
+    target_price: float | None = None,
+    stop_price: float | None = None,
     payload: dict[str, Any] | None = None,
 ) -> None:
     with db() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO portfolio(ticker, lots, avg_price, last_price, "
-            "updated_at, payload) VALUES (?,?,?,?,?,?)",
+            "target_price, stop_price, updated_at, payload) VALUES (?,?,?,?,?,?,?,?)",
             (
                 ticker.upper(), lots, avg_price, last_price,
+                target_price, stop_price,
                 datetime.utcnow().isoformat(),
                 json.dumps(payload or {}),
             ),
         )
+
+
+def set_position_targets(ticker: str, target_price: float | None,
+                         stop_price: float | None) -> bool:
+    """Set/ubah target profit & stop cut-loss untuk sebuah posisi. False bila
+    ticker tidak ada di portofolio."""
+    with db() as conn:
+        cur = conn.execute(
+            "UPDATE portfolio SET target_price=?, stop_price=?, updated_at=? WHERE ticker=?",
+            (target_price, stop_price, datetime.utcnow().isoformat(), ticker.upper()),
+        )
+        return cur.rowcount > 0
 
 
 def get_portfolio() -> list[dict[str, Any]]:
