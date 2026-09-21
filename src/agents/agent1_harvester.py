@@ -73,13 +73,16 @@ def run(dry_run: bool | None = None) -> dict[str, Any]:
     log.info("Agent 1 (Harvester) mulai.")
     dbm.init_db()
 
+    # Gabungkan ticker dari .env ke DB (tambah yang belum ada) sehingga
+    # menambah WATCHLIST di .env langsung terpakai. Untuk menghapus, gunakan
+    # `./ta watchlist --remove ...` atau `--sync`.
+    db_wl = set(dbm.get_watchlist())
+    for tk in settings.watchlist_tickers:
+        if tk not in db_wl:
+            dbm.add_to_watchlist(tk, source="config")
     tickers = dbm.get_watchlist() or settings.watchlist_tickers
     if not tickers:
         log.warning("Watchlist kosong.")
-    else:
-        # Seed watchlist dari config bila DB kosong.
-        for tk in tickers:
-            dbm.add_to_watchlist(tk, source="config")
 
     structured = _collect_structured(tickers)
     headlines = newsm.fetch_news()

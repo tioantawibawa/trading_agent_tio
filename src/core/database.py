@@ -109,6 +109,11 @@ def get_watchlist() -> list[str]:
     return [r["ticker"] for r in rows]
 
 
+def remove_from_watchlist(ticker: str) -> None:
+    with db() as conn:
+        conn.execute("DELETE FROM watchlist WHERE ticker=?", (ticker.upper(),))
+
+
 def reset_watchlist() -> None:
     with db() as conn:
         conn.execute("DELETE FROM watchlist")

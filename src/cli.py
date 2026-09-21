@@ -76,6 +76,31 @@ def _telegram_chatid() -> None:
         log.info("Salin Chat ID di atas ke TELEGRAM_ALLOWED_CHAT_IDS di .env.")
 
 
+def _watchlist(args) -> None:  # noqa: ANN001
+    """Tampilkan / ubah watchlist yang tersimpan di DB."""
+    dbm.init_db()
+
+    def _split(s: str) -> list[str]:
+        return [t.strip().upper() for t in s.split(",") if t.strip()]
+
+    if args.sync:
+        dbm.reset_watchlist()
+        for tk in settings.watchlist_tickers:
+            dbm.add_to_watchlist(tk, source="config")
+        log.info("Watchlist di-reset dari .env (%d ticker).", len(settings.watchlist_tickers))
+    if args.add:
+        for tk in _split(args.add):
+            dbm.add_to_watchlist(tk, source="cli")
+        log.info("Ditambahkan: %s", ", ".join(_split(args.add)))
+    if args.remove:
+        for tk in _split(args.remove):
+            dbm.remove_from_watchlist(tk)
+        log.info("Dihapus: %s", ", ".join(_split(args.remove)))
+
+    current = dbm.get_watchlist()
+    log.info("Watchlist saat ini (%d): %s", len(current), ", ".join(current) or "(kosong)")
+
+
 def _pipeline() -> None:
     """Jalankan alur pagi lengkap sekali (untuk uji end-to-end)."""
     from src.agents import (
@@ -105,6 +130,12 @@ def main() -> None:
     sub.add_parser("telegram-chatid", parents=[common],
                    help="Tampilkan Chat ID dari pesan terbaru ke bot Telegram")
 
+    wl = sub.add_parser("watchlist", parents=[common], help="Kelola watchlist")
+    wl.add_argument("--add", help="Tambah ticker (pisah koma), mis. GOTO,BRIS")
+    wl.add_argument("--remove", help="Hapus ticker (pisah koma)")
+    wl.add_argument("--sync", action="store_true",
+                    help="Reset watchlist = WATCHLIST di .env")
+
     ra = sub.add_parser("run-agent", parents=[common], help="Jalankan satu agent")
     ra.add_argument("number", type=int, choices=range(1, 7))
 
@@ -132,6 +163,8 @@ def main() -> None:
         log.info("Model vision : %s", _resolve_model("vision") or "(tidak ada / template)")
     elif args.cmd == "telegram-chatid":
         _telegram_chatid()
+    elif args.cmd == "watchlist":
+        _watchlist(args)
     elif args.cmd == "run-agent":
         _run_agent(args.number)
 

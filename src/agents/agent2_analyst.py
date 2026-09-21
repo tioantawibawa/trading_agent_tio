@@ -48,7 +48,7 @@ def _score_candidate(tk: str, daily: dict[str, Any], mentions: dict[str, int]) -
         score += min(mention_score * 0.5, 1.5)
         reasons.append(f"ramai diberitakan ({mention_score}x)")
 
-    if score <= 0:
+    if score <= 0 or score < settings.min_screen_score:
         return None
     return {
         "ticker": tk.upper(),

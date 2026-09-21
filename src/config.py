@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     volume_spike_multiplier: float = 2.0
     volume_lookback_days: int = 20
     max_candidates: int = 5
+    min_screen_score: float = 0.0    # skor minimum Agent 2 agar masuk shortlist
 
     # Jam bursa (WIB)
     session1_open: str = "09:00"
