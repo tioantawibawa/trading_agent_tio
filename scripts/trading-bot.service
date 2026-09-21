@@ -1,0 +1,23 @@
+# systemd unit untuk bot Telegram (Agent 5 alert handler + Agent 6 screenshot).
+# Salin ke /etc/systemd/system/trading-bot.service lalu:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now trading-bot
+[Unit]
+Description=Trading Agent TIO — Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tio
+WorkingDirectory=/home/tio/trading_agent_tio
+EnvironmentFile=/home/tio/trading_agent_tio/.env
+ExecStart=/home/tio/trading_agent_tio/.venv/bin/python -m src.cli bot
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

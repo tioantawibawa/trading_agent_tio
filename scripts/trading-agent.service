@@ -1,0 +1,26 @@
+# systemd unit untuk orchestrator (Agent 1-5 terjadwal + monitor).
+# Salin ke /etc/systemd/system/trading-agent.service lalu:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now trading-agent
+#
+# Sesuaikan User, WorkingDirectory, dan path .venv.
+[Unit]
+Description=Trading Agent TIO — Orchestrator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tio
+WorkingDirectory=/home/tio/trading_agent_tio
+EnvironmentFile=/home/tio/trading_agent_tio/.env
+ExecStart=/home/tio/trading_agent_tio/.venv/bin/python -m src.cli serve
+Restart=on-failure
+RestartSec=10
+# Hardening ringan
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

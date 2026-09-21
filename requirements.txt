@@ -1,0 +1,24 @@
+# Core runtime
+pydantic>=2.6
+pydantic-settings>=2.2
+APScheduler>=3.10
+python-dotenv>=1.0
+
+# Market data & analytics (deterministik)
+yfinance>=0.2.40
+pandas>=2.2
+numpy>=1.26
+
+# Unstructured data
+feedparser>=6.0        # RSS berita
+requests>=2.31
+beautifulsoup4>=4.12   # scraping ringan (opsional)
+
+# Notifikasi
+python-telegram-bot>=21.0
+
+# LLM (default provider: Anthropic). Ganti sesuai kebutuhan.
+anthropic>=0.40
+
+# Dev / test
+pytest>=8.0
