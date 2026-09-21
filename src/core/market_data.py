@@ -212,6 +212,56 @@ class YFinanceProvider:
         return self._retry(_fetch, "last_price", ticker)
 
 
+class StooqProvider:
+    """Stooq.com — CSV harian gratis, tanpa API key, ramah IP data-center.
+
+    Alternatif saat Yahoo memblokir IP VPS. Hanya data harian (EOD), jadi
+    `last_price` memakai Close terakhir (bukan realtime). Format simbol IDX
+    di Stooq bisa berbeda; sesuaikan `SUFFIX` bila diagnostik menunjukkan
+    format lain (jalankan: python scripts/diag_data.py).
+    """
+
+    SUFFIX = ".jk"  # ubah ke ".id" atau "" bila diag_data.py menunjukkan begitu
+    DL_URL = "https://stooq.com/q/d/l/"
+
+    def _symbol(self, ticker: str) -> str:
+        return ticker.upper().replace(".JK", "").lower() + self.SUFFIX
+
+    def history(self, ticker: str, period: str = "3mo", interval: str = "1d"):
+        import io
+
+        import pandas as pd
+
+        try:
+            from curl_cffi import requests as creq
+            r = creq.get(self.DL_URL, params={"s": self._symbol(ticker), "i": "d"},
+                         impersonate="chrome", timeout=30)
+            body = r.text
+        except ImportError:
+            import requests
+            r = requests.get(self.DL_URL, params={"s": self._symbol(ticker), "i": "d"}, timeout=30)
+            body = r.text
+
+        if not body.lower().startswith("date"):
+            log.warning("stooq history %s: respons tak terduga (%s)", ticker, body[:60])
+            return pd.DataFrame()
+        df = pd.read_csv(io.StringIO(body))
+        df.index = pd.to_datetime(df["Date"])
+        # Stooq: Date,Open,High,Low,Close,Volume (sudah kapital) — samakan bila perlu.
+        df = df.rename(columns=str.capitalize)
+        cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
+        return df[cols]
+
+    def last_price(self, ticker: str) -> float | None:
+        df = self.history(ticker, period="5d")
+        if df is None or len(df) == 0:
+            return None
+        try:
+            return float(df["Close"].iloc[-1])
+        except Exception:  # noqa: BLE001
+            return None
+
+
 class NullProvider:
     """Fallback jika provider tidak dikenal — tidak mengembalikan data."""
 
@@ -232,6 +282,8 @@ def get_provider() -> MarketDataProvider:
         return YFinanceProvider()
     if name == "fmp":
         return FMPProvider()
+    if name == "stooq":
+        return StooqProvider()
     # TODO: tambahkan GoAPIProvider / RTIProvider di sini untuk realtime.
     log.warning("Provider '%s' belum diimplementasikan — memakai NullProvider.", name)
     return NullProvider()
