@@ -84,12 +84,22 @@ def analyze_screenshot(image_bytes: bytes, media_type: str = "image/png") -> dic
     """Proses screenshot → simpan posisi ke DB → kembalikan {data, summary}."""
     dbm.init_db()
     raw = read_image(image_bytes, _EXTRACT_PROMPT, media_type=media_type)
-    data = _parse_json(raw or "")
-    if not data:
+    if raw is None:
+        log.warning("Agent 6: vision LLM mengembalikan None (model gagal/429/tak dukung gambar).")
         return {
             "data": None,
-            "summary": "Maaf, gagal membaca screenshot. Pastikan gambar jelas "
-            "dan LLM vision (ANTHROPIC_API_KEY) sudah dikonfigurasi.",
+            "summary": "Maaf, model vision gagal membaca gambar (kemungkinan model "
+            "gratis sibuk/rate-limit atau tak mendukung gambar). Coba kirim ulang, "
+            "atau set LLM_VISION_MODEL ke model vision yang stabil di .env.",
+        }
+    log.info("Agent 6: respons vision (%d char): %.200s", len(raw), raw)
+    data = _parse_json(raw)
+    if not data:
+        log.warning("Agent 6: respons vision bukan JSON valid: %.300s", raw)
+        return {
+            "data": None,
+            "summary": "Maaf, hasil pembacaan tidak dalam format yang bisa diproses. "
+            "Coba kirim ulang screenshot yang lebih jelas.",
         }
 
     # Perbarui DB portofolio.

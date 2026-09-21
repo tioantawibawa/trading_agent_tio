@@ -130,6 +130,10 @@ def main() -> None:
     sub.add_parser("telegram-chatid", parents=[common],
                    help="Tampilkan Chat ID dari pesan terbaru ke bot Telegram")
 
+    tv = sub.add_parser("test-vision", parents=[common],
+                        help="Uji baca gambar (Agent 6) dari file lokal")
+    tv.add_argument("image", help="Path file gambar (png/jpg)")
+
     wl = sub.add_parser("watchlist", parents=[common], help="Kelola watchlist")
     wl.add_argument("--add", help="Tambah ticker (pisah koma), mis. GOTO,BRIS")
     wl.add_argument("--remove", help="Hapus ticker (pisah koma)")
@@ -163,6 +167,17 @@ def main() -> None:
         log.info("Model vision : %s", _resolve_model("vision") or "(tidak ada / template)")
     elif args.cmd == "telegram-chatid":
         _telegram_chatid()
+    elif args.cmd == "test-vision":
+        import mimetypes
+        from pathlib import Path
+        from src.agents.agent6_portfolio import analyze_screenshot
+        p = Path(args.image)
+        if not p.exists():
+            log.error("File tidak ditemukan: %s", p)
+            return
+        mt = mimetypes.guess_type(str(p))[0] or "image/png"
+        res = analyze_screenshot(p.read_bytes(), media_type=mt)
+        log.info("Ringkasan:\n%s", res["summary"])
     elif args.cmd == "watchlist":
         _watchlist(args)
     elif args.cmd == "run-agent":

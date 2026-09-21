@@ -133,7 +133,11 @@ def _free_model_list(kind: str) -> list[str]:
     def _score(m: dict):
         idl = m.get("id", "").lower()
         fam = next((len(pref) - i for i, k in enumerate(pref) if k in idl), 0)
-        return (fam, m.get("context_length") or 0)
+        # Untuk vision, utamakan model yang jelas bertipe visual.
+        vbonus = 0
+        if kind == "vision" and any(k in idl for k in ("gemini", "-vl", "vision", "pixtral")):
+            vbonus = 10
+        return (vbonus + fam, m.get("context_length") or 0)
 
     free.sort(key=_score, reverse=True)
     ids = [m["id"] for m in free][:_MAX_CANDIDATES]
