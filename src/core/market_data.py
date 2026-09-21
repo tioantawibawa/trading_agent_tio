@@ -29,24 +29,54 @@ class MarketDataProvider(Protocol):
 
 
 class YFinanceProvider:
-    """Data harga via yfinance. Cocok untuk swing/breakout harian."""
+    """Data harga via yfinance. Cocok untuk swing/breakout harian.
+
+    Yahoo kerap membatasi laju (HTTP 429) untuk IP data-center/VPS. Provider
+    ini menambah retry dengan backoff dan jeda kecil untuk meredamnya. Bila
+    tetap sering 429, pertimbangkan provider berbayar (GoAPI/RTI).
+    """
+
+    max_retries: int = 3
+    backoff_base: float = 2.0  # detik: 2, 4, 8...
+
+    def _retry(self, fn, what: str, ticker: str):
+        import time
+
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries):
+            try:
+                return fn()
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                is_rate = "429" in str(exc) or "Too Many Requests" in str(exc)
+                if attempt < self.max_retries - 1 and is_rate:
+                    wait = self.backoff_base * (2 ** attempt)
+                    log.warning("%s %s kena rate-limit, coba lagi dalam %.0fs.", what, ticker, wait)
+                    time.sleep(wait)
+                    continue
+                break
+        log.warning("%s %s gagal: %s", what, ticker, last_exc)
+        return None
 
     def history(self, ticker: str, period: str = "3mo", interval: str = "1d"):
+        import pandas as pd
         import yfinance as yf
 
-        df = yf.Ticker(to_yahoo(ticker)).history(period=period, interval=interval)
-        return df
+        def _fetch():
+            return yf.Ticker(to_yahoo(ticker)).history(period=period, interval=interval)
+
+        df = self._retry(_fetch, "history", ticker)
+        return df if df is not None else pd.DataFrame()
 
     def last_price(self, ticker: str) -> float | None:
-        try:
-            import yfinance as yf
+        import yfinance as yf
 
+        def _fetch():
             fi = yf.Ticker(to_yahoo(ticker)).fast_info
             price = fi.get("last_price") if hasattr(fi, "get") else fi["lastPrice"]
             return float(price) if price else None
-        except Exception as exc:  # noqa: BLE001
-            log.debug("last_price gagal untuk %s: %s", ticker, exc)
-            return None
+
+        return self._retry(_fetch, "last_price", ticker)
 
 
 class NullProvider:

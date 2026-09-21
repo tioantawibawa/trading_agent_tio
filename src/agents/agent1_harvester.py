@@ -24,9 +24,13 @@ log = get_logger("agent1")
 
 
 def _collect_structured(tickers: list[str]) -> dict[str, dict[str, Any]]:
+    import time
+
     provider = get_provider()
     out: dict[str, dict[str, Any]] = {}
-    for tk in tickers:
+    for i, tk in enumerate(tickers):
+        if i:
+            time.sleep(1.0)  # jeda antar-ticker untuk meredam rate-limit Yahoo
         try:
             df = provider.history(tk, period="3mo", interval="1d")
             if df is None or len(df) == 0:

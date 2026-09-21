@@ -52,16 +52,21 @@ def _pipeline() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="trading-agent-tio")
+    # Flag bersama untuk semua subcommand.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--dry-run", action="store_true",
+        help="Jangan kirim notifikasi/email sungguhan (hanya log)",
+    )
+
     sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("serve", parents=[common], help="Jalankan orchestrator (scheduler + monitor)")
+    sub.add_parser("bot", parents=[common], help="Jalankan bot Telegram (Agent 5/6)")
+    sub.add_parser("pipeline", parents=[common], help="Jalankan Agent 1→4 berurutan sekali")
+    sub.add_parser("init-db", parents=[common], help="Inisialisasi skema database")
 
-    sub.add_parser("serve", help="Jalankan orchestrator (scheduler + monitor)")
-    sub.add_parser("bot", help="Jalankan bot Telegram (Agent 5/6)")
-    sub.add_parser("pipeline", help="Jalankan Agent 1→4 berurutan sekali")
-    sub.add_parser("init-db", help="Inisialisasi skema database")
-
-    ra = sub.add_parser("run-agent", help="Jalankan satu agent")
+    ra = sub.add_parser("run-agent", parents=[common], help="Jalankan satu agent")
     ra.add_argument("number", type=int, choices=range(1, 7))
-    ra.add_argument("--dry-run", action="store_true", help="Jangan kirim notifikasi sungguhan")
 
     args = parser.parse_args()
 
