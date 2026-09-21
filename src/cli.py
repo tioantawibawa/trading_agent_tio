@@ -237,6 +237,8 @@ def main() -> None:
                         help="Uji baca gambar (Agent 6) dari file lokal")
     tv.add_argument("image", help="Path file gambar (png/jpg)")
 
+    sub.add_parser("reconcile", parents=[common],
+                   help="Rekonsiliasi manual: nonaktifkan semua trade plan hari ini")
     sub.add_parser("report", parents=[common],
                    help="Laporan prospek 7 hari untuk portofolio")
     tg = sub.add_parser("target", parents=[common],
@@ -292,6 +294,10 @@ def main() -> None:
         mt = mimetypes.guess_type(str(p))[0] or "image/png"
         res = analyze_screenshot(p.read_bytes(), media_type=mt)
         log.info("Ringkasan:\n%s", res["summary"])
+    elif args.cmd == "reconcile":
+        n = len(dbm.get_active_plans())
+        dbm.deactivate_plans()
+        log.info("Rekonsiliasi: %d trade plan dinonaktifkan.", n)
     elif args.cmd == "report":
         from src.core.outlook import portfolio_report
         import re
