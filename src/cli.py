@@ -227,6 +227,7 @@ def main() -> None:
     sub.add_parser("bot", parents=[common], help="Jalankan bot Telegram (Agent 5/6)")
     sub.add_parser("pipeline", parents=[common], help="Jalankan Agent 1→4 berurutan sekali")
     sub.add_parser("init-db", parents=[common], help="Inisialisasi skema database")
+    sub.add_parser("alerts", parents=[common], help="Tampilkan riwayat alert terakhir")
     sub.add_parser("doctor", parents=[common], help="Cek kesehatan semua komponen/agent")
     sub.add_parser("status", parents=[common], help="Alias 'doctor'")
     sub.add_parser("llm-model", parents=[common], help="Tampilkan model LLM yang terpilih")
@@ -281,6 +282,13 @@ def main() -> None:
         log.info("Provider: %s", settings.llm_provider)
         log.info("Model teks   : %s", _resolve_model("text") or "(tidak ada / template)")
         log.info("Model vision : %s", _resolve_model("vision") or "(tidak ada / template)")
+    elif args.cmd == "alerts":
+        rows = dbm.get_recent_alerts(25)
+        if not rows:
+            log.info("Belum ada alert tercatat.")
+        for r in rows:
+            log.info("%s | %-7s | %s | %s", r["created_at"][:19], r["kind"],
+                     r["ticker"], (r["message"] or "")[:80])
     elif args.cmd in ("doctor", "status"):
         _doctor()
     elif args.cmd == "telegram-chatid":

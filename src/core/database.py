@@ -270,6 +270,16 @@ def minutes_since_last_alert(ticker: str, kind: str) -> float | None:
         return None
 
 
+def get_recent_alerts(limit: int = 20) -> list[dict[str, Any]]:
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT created_at, ticker, kind, price, message FROM alerts "
+            "ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def already_alerted_today(ticker: str, kind: str) -> bool:
     """Cegah spam: cek apakah alert jenis tertentu sudah dikirim hari ini."""
     start = _today() + "T00:00:00"

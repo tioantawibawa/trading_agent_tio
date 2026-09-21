@@ -83,9 +83,15 @@ async def _evaluate_position(pos: dict[str, Any], price: float) -> None:
         dbm.log_alert(tk, "CUTLOSS", price, msg)
 
 
-# Referensi harga per ticker untuk deteksi lonjakan (bertahan antar-poll dalam
-# proses yang sama). {ticker: (epoch_detik, harga)}
-_spike_ref: dict[str, tuple[float, float]] = {}
+from collections import deque
+
+# Riwayat harga singkat per ticker (sliding window) untuk deteksi lonjakan.
+# {ticker: deque[(epoch_detik, harga)]}
+_spike_hist: dict[str, deque] = {}
+
+# Heartbeat: cetak log INFO tiap N poll (~ N menit) agar mudah diverifikasi.
+_poll_count = 0
+_HEARTBEAT_EVERY = 15
 
 
 def _context_notes(tk: str, price: float) -> tuple[str, float | None]:
@@ -105,27 +111,30 @@ def _context_notes(tk: str, price: float) -> tuple[str, float | None]:
     return ("; ".join(notes), day_gain)
 
 
-async def _scan_spikes(price_map: dict[str, float], tickers: set[str]) -> None:
-    """Early warning: deteksi kenaikan harga mendadak & kirim alert proaktif."""
+async def _scan_spikes(price_map: dict[str, float], tickers: set[str]) -> int:
+    """Early warning: deteksi kenaikan mendadak (kenaikan dari titik terendah
+    dalam jendela geser) & kirim alert proaktif. Kembalikan jumlah spike."""
     if not settings.early_warning:
-        return
+        return 0
     import time
 
     now = time.time()
     window_s = settings.early_warning_window_min * 60
+    spikes = 0
     for tk in tickers:
         price = price_map.get(tk)
         if price is None or price <= 0:
             continue
-        ref = _spike_ref.get(tk)
-        if ref is None:
-            _spike_ref[tk] = (now, price)
+        hist = _spike_hist.setdefault(tk, deque(maxlen=600))
+        hist.append((now, price))
+        # Buang sampel di luar jendela.
+        while hist and now - hist[0][0] > window_s:
+            hist.popleft()
+        if len(hist) < 2:
             continue
-        ref_t, ref_p = ref
-        if now - ref_t < window_s:
-            continue  # jendela belum penuh — tahan referensi
-        pct = (price - ref_p) / ref_p * 100 if ref_p else 0.0
-        _spike_ref[tk] = (now, price)  # geser jendela
+        # Kenaikan dari harga TERENDAH dalam jendela (deteksi rebound/spike).
+        low_t, low_p = min(hist, key=lambda s: s[1])
+        pct = (price - low_p) / low_p * 100 if low_p else 0.0
         if pct < settings.early_warning_pct:
             continue
         # Cooldown agar tidak spam.
@@ -136,12 +145,15 @@ async def _scan_spikes(price_map: dict[str, float], tickers: set[str]) -> None:
         extra = f" | hari ini {day_gain:+.1f}%" if day_gain is not None else ""
         if notes:
             extra += f" | {notes}"
-        mins = int((now - ref_t) / 60)
+        mins = max(1, int((now - low_t) / 60))
         msg = (f"🚨 <b>[EARLY WARNING — SPIKE]</b> {tk} melonjak "
                f"<b>+{pct:.1f}%</b> dalam ~{mins} menit (now {_rp(price)}){extra}. "
                f"Potensi momentum — cek peluang.")
         await send_telegram(msg)
         dbm.log_alert(tk, "SPIKE", price, msg)
+        log.info("SPIKE terdeteksi: %s +%.1f%% (%s)", tk, pct, _rp(price))
+        spikes += 1
+    return spikes
 
 
 async def poll_once() -> int:
@@ -174,7 +186,14 @@ async def poll_once() -> int:
             await _evaluate_position(positions[tk], price)
 
     # Early warning dipindai untuk seluruh watchlist + plan + posisi.
-    await _scan_spikes(price_map, all_tickers)
+    spikes = await _scan_spikes(price_map, all_tickers)
+
+    # Heartbeat berkala agar mudah diverifikasi monitor benar-benar berjalan.
+    global _poll_count
+    _poll_count += 1
+    if _poll_count % _HEARTBEAT_EVERY == 1 or spikes:
+        log.info("Monitor aktif: %d saham dipantau (harga OK: %d), %d spike.",
+                 len(all_tickers), len(price_map), spikes)
     return len(all_tickers)
 
 
