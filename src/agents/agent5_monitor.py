@@ -105,7 +105,7 @@ def _context_notes(tk: str, price: float) -> tuple[str, float | None]:
     return ("; ".join(notes), day_gain)
 
 
-async def _scan_spikes(provider, tickers: set[str]) -> None:
+async def _scan_spikes(price_map: dict[str, float], tickers: set[str]) -> None:
     """Early warning: deteksi kenaikan harga mendadak & kirim alert proaktif."""
     if not settings.early_warning:
         return
@@ -114,7 +114,7 @@ async def _scan_spikes(provider, tickers: set[str]) -> None:
     now = time.time()
     window_s = settings.early_warning_window_min * 60
     for tk in tickers:
-        price = provider.last_price(tk)
+        price = price_map.get(tk)
         if price is None or price <= 0:
             continue
         ref = _spike_ref.get(tk)
@@ -154,10 +154,18 @@ async def poll_once() -> int:
     plans = {p["ticker"]: p for p in dbm.get_active_plans() if p.get("stage") == "planned"}
     positions = {p["ticker"]: p for p in dbm.get_portfolio()}
     watch = set(dbm.get_watchlist())
-    tickers = set(plans) | set(positions)
+    eval_tickers = set(plans) | set(positions)
+    all_tickers = eval_tickers | watch  # termasuk LQ45 bila dimuat ke watchlist
 
-    for tk in tickers:
-        price = provider.last_price(tk)
+    # Ambil harga SEKALI per saham (dipakai ulang untuk evaluasi & scan spike).
+    price_map: dict[str, float] = {}
+    for tk in all_tickers:
+        p = provider.last_price(tk)
+        if p is not None:
+            price_map[tk] = p
+
+    for tk in eval_tickers:
+        price = price_map.get(tk)
         if price is None:
             continue
         if tk in plans:
@@ -165,9 +173,9 @@ async def poll_once() -> int:
         if tk in positions:
             await _evaluate_position(positions[tk], price)
 
-    # Early warning dipindai untuk watchlist + plan + posisi.
-    await _scan_spikes(provider, watch | set(plans) | set(positions))
-    return len(tickers)
+    # Early warning dipindai untuk seluruh watchlist + plan + posisi.
+    await _scan_spikes(price_map, all_tickers)
+    return len(all_tickers)
 
 
 async def run_forever() -> None:

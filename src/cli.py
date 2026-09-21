@@ -88,6 +88,16 @@ def _watchlist(args) -> None:  # noqa: ANN001
         for tk in settings.watchlist_tickers:
             dbm.add_to_watchlist(tk, source="config")
         log.info("Watchlist di-reset dari .env (%d ticker).", len(settings.watchlist_tickers))
+    if getattr(args, "lq45", False) or getattr(args, "preset", None):
+        from src.core.presets import get_preset
+        name = "lq45" if getattr(args, "lq45", False) else args.preset
+        tickers = get_preset(name)
+        if not tickers:
+            log.error("Preset '%s' tidak dikenal.", name)
+        else:
+            for tk in tickers:
+                dbm.add_to_watchlist(tk, source=f"preset:{name}")
+            log.info("Preset %s ditambahkan (%d ticker).", name, len(tickers))
     if args.add:
         for tk in _split(args.add):
             dbm.add_to_watchlist(tk, source="cli")
@@ -145,6 +155,9 @@ def main() -> None:
     wl.add_argument("--remove", help="Hapus ticker (pisah koma)")
     wl.add_argument("--sync", action="store_true",
                     help="Reset watchlist = WATCHLIST di .env")
+    wl.add_argument("--lq45", action="store_true",
+                    help="Tambahkan seluruh konstituen LQ45 ke watchlist")
+    wl.add_argument("--preset", help="Tambahkan preset bernama (mis. lq45)")
 
     ra = sub.add_parser("run-agent", parents=[common], help="Jalankan satu agent")
     ra.add_argument("number", type=int, choices=range(1, 7))
