@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     llm_model: str = "claude-haiku-4-5-20251001"
     llm_vision_model: str = "claude-haiku-4-5-20251001"
     anthropic_api_key: str = ""
+    openrouter_api_key: str = ""
 
     # Telegram
     telegram_bot_token: str = ""

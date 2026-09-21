@@ -17,8 +17,11 @@ beautifulsoup4>=4.12   # scraping ringan (opsional)
 # Notifikasi
 python-telegram-bot>=21.0
 
-# LLM (default provider: Anthropic). Ganti sesuai kebutuhan.
+# LLM. Pilih sesuai LLM_PROVIDER di .env:
+#   anthropic  -> paket 'anthropic'
+#   openrouter -> paket 'openai' (endpoint OpenAI-compatible OpenRouter)
 anthropic>=0.40
+openai>=1.40
 
 # Dev / test
 pytest>=8.0
