@@ -1,20 +1,26 @@
-# systemd unit untuk orchestrator (Agent 1-5 terjadwal + monitor).
-# Salin ke /etc/systemd/system/trading-agent.service lalu:
+# systemd unit: orchestrator (Agent 1-5 terjadwal + monitor intraday).
+#
+# Sesuaikan User & path bila username/lokasi berbeda (default: user 'ubuntu',
+# proyek di /home/ubuntu/trading_agent_tio).
+#
+# Pasang:
+#   sudo cp scripts/trading-agent.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now trading-agent
+#   journalctl -u trading-agent -f
 #
-# Sesuaikan User, WorkingDirectory, dan path .venv.
+# Catatan: .env dibaca langsung oleh aplikasi dari WorkingDirectory (pydantic),
+# jadi TIDAK perlu EnvironmentFile — ini menghindari salah-parsing komentar.
 [Unit]
-Description=Trading Agent TIO — Orchestrator
+Description=Trading Agent TIO — Orchestrator (scheduler + monitor)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=tio
-WorkingDirectory=/home/tio/trading_agent_tio
-EnvironmentFile=/home/tio/trading_agent_tio/.env
-ExecStart=/home/tio/trading_agent_tio/.venv/bin/python -m src.cli serve
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading_agent_tio
+ExecStart=/home/ubuntu/trading_agent_tio/.venv/bin/python -m src.cli serve
 Restart=on-failure
 RestartSec=10
 # Hardening ringan

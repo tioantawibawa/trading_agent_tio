@@ -40,14 +40,19 @@ pytest -q                                     # unit test formula
 ## 4. Jalankan sebagai service
 
 ```bash
+# File .service sudah disetel untuk user 'ubuntu' & /home/ubuntu/trading_agent_tio.
+# Bila username/lokasi berbeda, edit User= dan path di kedua file lebih dulu.
 sudo cp scripts/trading-agent.service /etc/systemd/system/
 sudo cp scripts/trading-bot.service   /etc/systemd/system/
-# sesuaikan User/paths di kedua file bila perlu
 sudo systemctl daemon-reload
 sudo systemctl enable --now trading-agent trading-bot
-sudo systemctl status trading-agent
+sudo systemctl status trading-agent trading-bot
 journalctl -u trading-agent -f               # pantau log
 ```
+
+Service membaca `.env` langsung dari `WorkingDirectory` (via pydantic), jadi
+tidak memakai `EnvironmentFile` — ini menghindari salah-parsing komentar inline
+oleh systemd. Pastikan `.env` berada di folder proyek dan `chmod 600`.
 
 - `trading-agent` = orchestrator (Agent 1-5 terjadwal + monitor intraday).
 - `trading-bot` = bot Telegram (perintah + screenshot Agent 6).
