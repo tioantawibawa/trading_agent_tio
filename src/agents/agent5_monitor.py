@@ -146,9 +146,20 @@ async def _scan_spikes(price_map: dict[str, float], tickers: set[str]) -> int:
         if notes:
             extra += f" | {notes}"
         mins = max(1, int((now - low_t) / 60))
+        # Target harga (proyeksi 7-hari) untuk konteks aksi.
+        target_line = ""
+        try:
+            from src.core.outlook import weekly_outlook
+            o = weekly_outlook(tk)
+            if o:
+                target_line = (f"\n🎯 Target 7h: <b>{_rp(o['target'])}</b> "
+                               f"({o['upside_pct']:+.1f}%) · 🛑 Stop: {_rp(o['stop'])} "
+                               f"· Resistance {_rp(o['resistance'])}")
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Gagal hitung target spike %s: %s", tk, exc)
         msg = (f"🚨 <b>[EARLY WARNING — SPIKE]</b> {tk} melonjak "
-               f"<b>+{pct:.1f}%</b> dalam ~{mins} menit (now {_rp(price)}){extra}. "
-               f"Potensi momentum — cek peluang.")
+               f"<b>+{pct:.1f}%</b> dalam ~{mins} menit (now {_rp(price)}){extra}."
+               f"{target_line}\nPotensi momentum — cek peluang.")
         await send_telegram(msg)
         dbm.log_alert(tk, "SPIKE", price, msg)
         log.info("SPIKE terdeteksi: %s +%.1f%% (%s)", tk, pct, _rp(price))
