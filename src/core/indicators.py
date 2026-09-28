@@ -14,6 +14,38 @@ def _sma(values: list[float], period: int) -> float | None:
     return sum(values[-period:]) / period
 
 
+def sma(values: list[float], period: int) -> float | None:
+    """Simple Moving Average dari `period` nilai terakhir."""
+    return _sma(values, period)
+
+
+def trend_label(closes: list[float]) -> str:
+    """Klasifikasi tren dari SMA5 vs SMA20: 'naik' | 'turun' | 'sideways'."""
+    s5, s20 = _sma(closes, 5), _sma(closes, 20)
+    if s5 is None or s20 is None:
+        return "belum jelas"
+    last = closes[-1]
+    if s5 > s20 * 1.005 and last >= s20:
+        return "naik"
+    if s5 < s20 * 0.995 and last <= s20:
+        return "turun"
+    return "sideways"
+
+
+def rsi(closes: list[float], period: int = 14) -> float | None:
+    """Relative Strength Index (0-100). None bila data kurang."""
+    if len(closes) < period + 1:
+        return None
+    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    recent = deltas[-period:]
+    gains = sum(d for d in recent if d > 0) / period
+    losses = sum(-d for d in recent if d < 0) / period
+    if losses == 0:
+        return 100.0
+    rs = gains / losses
+    return 100 - 100 / (1 + rs)
+
+
 def true_ranges(highs: list[float], lows: list[float], closes: list[float]) -> list[float]:
     """True Range per bar (butuh close bar sebelumnya)."""
     trs: list[float] = []

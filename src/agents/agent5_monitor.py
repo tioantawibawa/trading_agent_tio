@@ -38,17 +38,28 @@ async def _evaluate_plan(tk: str, plan: dict[str, Any], price: float) -> None:
     entry_low, entry_high = plan.get("entry_low"), plan.get("entry_high")
     tp, sl = plan.get("take_profit"), plan.get("stop_loss")
 
-    if sl and price <= sl and not dbm.already_alerted_today(tk, "CUTLOSS"):
-        msg = f"🔴 <b>[CUT LOSS ALERT]</b> {tk} menembus {_rp(sl)} (now {_rp(price)}). Disiplin eksekusi keluar."
+    entered = dbm.already_alerted_today(tk, "BUY")
+
+    # CUT LOSS plan hanya relevan SETELAH sinyal beli terpicu (harga sempat masuk zona).
+    if entered and sl and price <= sl and not dbm.already_alerted_today(tk, "CUTLOSS"):
+        msg = (f"🔴 <b>[CUT LOSS ALERT]</b> {tk} menembus {_rp(sl)} (now {_rp(price)}). "
+               f"Disiplin eksekusi keluar.")
         await send_telegram(msg)
         dbm.log_alert(tk, "CUTLOSS", price, msg)
-    elif tp and price >= tp and not dbm.already_alerted_today(tk, "TP"):
-        msg = f"🟢 <b>[TAKE PROFIT]</b> {tk} mencapai {_rp(tp)} (now {_rp(price)}). Pertimbangkan jual / trailing stop."
+    elif entered and tp and price >= tp and not dbm.already_alerted_today(tk, "TP"):
+        msg = (f"🟢 <b>[TAKE PROFIT]</b> {tk} mencapai {_rp(tp)} (now {_rp(price)}). "
+               f"Pertimbangkan jual / trailing stop.")
         await send_telegram(msg)
         dbm.log_alert(tk, "TP", price, msg)
     elif entry_low and entry_high and entry_low <= price <= entry_high \
-            and not dbm.already_alerted_today(tk, "BUY"):
-        msg = f"🔵 <b>[BUY SIGNAL]</b> {tk} di area beli {_rp(entry_low)}–{_rp(entry_high)} (now {_rp(price)})."
+            and not entered:
+        rec = plan.get("recommendation", "")
+        trend = plan.get("trend", "-")
+        rrr = plan.get("rrr", "-")
+        conf = plan.get("confidence", "-")
+        msg = (f"🔵 <b>[BUY SIGNAL]</b> {tk} ({rec}) di area {_rp(entry_low)}–{_rp(entry_high)} "
+               f"(now {_rp(price)})\n"
+               f"🎯 TP {_rp(tp)} · 🛑 SL {_rp(sl)} · R:R 1:{rrr} · tren {trend} · confidence {conf}")
         await send_telegram(msg)
         dbm.log_alert(tk, "BUY", price, msg)
 

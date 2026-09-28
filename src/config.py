@@ -65,7 +65,9 @@ class Settings(BaseSettings):
     # Strategi (Agent 3)
     atr_period: int = 14
     min_rrr: float = 2.0
-    max_stoploss_pct: float = 3.0
+    max_stoploss_pct: float = 3.0     # risiko maks per trade; plan melebihi ini dilewati
+    require_uptrend: bool = True      # hanya beli saat tren tidak turun (hindari pisau jatuh)
+    rsi_overbought: float = 80.0      # lewati Buy on Weakness bila RSI >= ini (rawan koreksi)
     volume_spike_multiplier: float = 2.0
     volume_lookback_days: int = 20
     max_candidates: int = 5
