@@ -108,6 +108,62 @@ def _supports_image(m: dict) -> bool:
 
 
 _MAX_CANDIDATES = 6  # berapa banyak model gratis dicoba sebelum menyerah
+_LIST_TTL = 3600     # refresh daftar model tiap 1 jam (ketersediaan model gratis berubah)
+_LIST_FETCHED_AT: dict[str, float] = {}
+_VERIFY_TTL = 1800   # hasil verifikasi model dianggap valid 30 menit
+_verified: dict[str, tuple[str, float]] = {}  # kind -> (model, timestamp)
+
+
+def probe_model(model: str) -> bool:
+    """Uji cepat apakah sebuah model OpenRouter bisa dipakai sekarang (bukan 429)."""
+    client = _openrouter_client()
+    if client is None:
+        return False
+    try:
+        client.chat.completions.create(
+            model=model, max_tokens=1,
+            messages=[{"role": "user", "content": "ping"}],
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.debug("Probe model %s gagal: %s", model, str(exc)[:80])
+        return False
+
+
+def ensure_working_model(kind: str) -> str | None:
+    """Pastikan ada model GRATIS yang benar-benar hidup sebelum dipakai.
+
+    Coba tiap kandidat (probe kecil), cache yang berhasil selama _VERIFY_TTL.
+    Hanya relevan untuk provider openrouter dengan model 'auto'; provider/model
+    tetap dikembalikan apa adanya. Kembalikan None bila tak ada yang lolos.
+    """
+    import time
+
+    if _provider() != "openrouter":
+        return _resolve_model(kind)
+    configured = settings.llm_vision_model if kind == "vision" else settings.llm_model
+    if configured and configured.strip().lower() != "auto":
+        return configured  # model ditetapkan manual — tidak diprobe
+
+    now = time.time()
+    cached = _verified.get(kind)
+    if cached and (now - cached[1]) < _VERIFY_TTL:
+        return cached[0]
+    for model in _candidate_models(kind):
+        if probe_model(model):
+            _verified[kind] = (model, now)
+            _MODEL_CACHE[kind] = model  # dahulukan di panggilan nyata
+            log.info("LLM %s terverifikasi hidup: %s", kind, model)
+            return model
+    log.warning("Tidak ada model %s gratis yang lolos verifikasi saat ini.", kind)
+    return None
+
+
+def verify_all() -> dict[str, str | None]:
+    """Verifikasi model teks & vision (dipakai saat startup / perintah llm-check)."""
+    if _provider() == "none":
+        return {"text": None, "vision": None}
+    return {"text": ensure_working_model("text"), "vision": ensure_working_model("vision")}
 
 
 def _free_model_list(kind: str) -> list[str]:
@@ -116,8 +172,11 @@ def _free_model_list(kind: str) -> list[str]:
     Model :free memakai kolam bersama yang sering rate-limited (429); dengan
     daftar ini, bila satu model gagal, pemanggil mencoba model berikutnya.
     """
+    import time
+
     cache_key = f"list_{kind}"
-    if cache_key in _MODEL_CACHE_LIST:
+    fetched = _LIST_FETCHED_AT.get(cache_key, 0)
+    if cache_key in _MODEL_CACHE_LIST and (time.time() - fetched) < _LIST_TTL:
         return _MODEL_CACHE_LIST[cache_key]
     try:
         models = _fetch_openrouter_models()
@@ -145,6 +204,7 @@ def _free_model_list(kind: str) -> list[str]:
         if cand not in ids:
             ids.append(cand)
     _MODEL_CACHE_LIST[cache_key] = ids
+    _LIST_FETCHED_AT[cache_key] = time.time()
     if ids:
         log.info("LLM kandidat model gratis (%s): %s", kind, ", ".join(ids[:4]) + " ...")
     return ids
@@ -195,6 +255,9 @@ def _openrouter_call(kind: str, messages: list, max_tokens: int) -> str | None:
     client = _openrouter_client()
     if client is None:
         return None
+    # Verifikasi model gratis yang hidup sebelum dipakai (hasil di-cache 30 mnt),
+    # sehingga panggilan nyata langsung memakai model yang sudah terbukti jalan.
+    ensure_working_model(kind)
     candidates = _candidate_models(kind)
     if not candidates:
         log.warning("Tidak ada model %s tersedia.", kind)

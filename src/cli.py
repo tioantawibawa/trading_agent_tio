@@ -231,6 +231,8 @@ def main() -> None:
     sub.add_parser("doctor", parents=[common], help="Cek kesehatan semua komponen/agent")
     sub.add_parser("status", parents=[common], help="Alias 'doctor'")
     sub.add_parser("llm-model", parents=[common], help="Tampilkan model LLM yang terpilih")
+    sub.add_parser("llm-check", parents=[common],
+                   help="Probe & verifikasi model LLM gratis yang benar-benar hidup")
     sub.add_parser("telegram-chatid", parents=[common],
                    help="Tampilkan Chat ID dari pesan terbaru ke bot Telegram")
 
@@ -291,6 +293,12 @@ def main() -> None:
                      r["ticker"], (r["message"] or "")[:80])
     elif args.cmd in ("doctor", "status"):
         _doctor()
+    elif args.cmd == "llm-check":
+        from src.core.llm import verify_all
+        log.info("Provider: %s", settings.llm_provider)
+        res = verify_all()
+        log.info("Model teks   terverifikasi: %s", res.get("text") or "(tidak ada yang hidup)")
+        log.info("Model vision terverifikasi: %s", res.get("vision") or "(tidak ada yang hidup)")
     elif args.cmd == "telegram-chatid":
         _telegram_chatid()
     elif args.cmd == "test-vision":

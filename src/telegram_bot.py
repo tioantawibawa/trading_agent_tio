@@ -183,6 +183,12 @@ def build_application():
 
 def run_bot() -> None:
     dbm.init_db()
+    if settings.llm_provider.lower() != "none":
+        try:
+            from src.core.llm import verify_all
+            log.info("Verifikasi model LLM (vision Agent 6): %s", verify_all())
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Verifikasi LLM dilewati: %s", exc)
     app = build_application()
     log.info("Bot Telegram mulai (polling).")
     app.run_polling()

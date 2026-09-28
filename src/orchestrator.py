@@ -77,6 +77,15 @@ async def serve() -> None:
     from apscheduler.triggers.cron import CronTrigger
 
     dbm.init_db()
+
+    # Verifikasi model LLM gratis yang hidup sebelum agent memakainya.
+    if settings.llm_provider.lower() != "none":
+        try:
+            from src.core.llm import verify_all
+            log.info("Verifikasi model LLM: %s", verify_all())
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Verifikasi LLM dilewati: %s", exc)
+
     tz = settings.timezone
     sched = AsyncIOScheduler(timezone=tz)
 
