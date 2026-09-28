@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     max_stoploss_pct: float = 3.0     # risiko maks per trade; plan melebihi ini dilewati
     require_uptrend: bool = True      # hanya beli saat tren tidak turun (hindari pisau jatuh)
     rsi_overbought: float = 80.0      # lewati Buy on Weakness bila RSI >= ini (rawan koreksi)
+    entry_volume_confirm: bool = True # BUY hanya terpicu bila volume di titik entry terkonfirmasi
+    entry_volume_mult: float = 1.3    # volume intraday terkini >= x rata-rata = terkonfirmasi
     volume_spike_multiplier: float = 2.0
     volume_lookback_days: int = 20
     max_candidates: int = 5

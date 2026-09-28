@@ -33,7 +33,34 @@ def _rp(v: Any) -> str:
     return f"Rp{int(v):,}".replace(",", ".") if v is not None else "-"
 
 
-async def _evaluate_plan(tk: str, plan: dict[str, Any], price: float) -> None:
+def _volume_confirmed(provider, tk: str) -> tuple[bool | None, float | None]:
+    """Konfirmasi volume di titik entry: bandingkan volume intraday terkini
+    (2 bar 15-menit terakhir) vs rata-rata bar 15-menit sebelumnya.
+
+    Kembalikan (confirmed, ratio). confirmed=None bila data tidak cukup
+    (tidak memblokir sinyal). confirmed=True bila ratio >= ambang.
+    """
+    from statistics import mean
+
+    try:
+        df = provider.history(tk, period="5d", interval="15m")
+        if df is None or len(df) < 12:
+            return None, None
+        vols = [float(v) for v in df["Volume"].tolist() if v is not None]
+        if len(vols) < 12:
+            return None, None
+        recent = mean(vols[-2:])                 # 2 bar terakhir (aktivitas kini)
+        base = mean(vols[-12:-2]) or 0.0         # rata-rata 10 bar sebelumnya
+        if base <= 0:
+            return None, None
+        ratio = recent / base
+        return (ratio >= settings.entry_volume_mult), ratio
+    except Exception as exc:  # noqa: BLE001
+        log.debug("Cek volume %s gagal: %s", tk, exc)
+        return None, None
+
+
+async def _evaluate_plan(tk: str, plan: dict[str, Any], price: float, provider=None) -> None:
     """Cek satu plan aktif terhadap harga terkini dan kirim alert bila perlu."""
     entry_low, entry_high = plan.get("entry_low"), plan.get("entry_high")
     tp, sl = plan.get("take_profit"), plan.get("stop_loss")
@@ -53,12 +80,23 @@ async def _evaluate_plan(tk: str, plan: dict[str, Any], price: float) -> None:
         dbm.log_alert(tk, "TP", price, msg)
     elif entry_low and entry_high and entry_low <= price <= entry_high \
             and not entered:
+        # Konfirmasi volume di titik entry (hindari false breakout tanpa volume).
+        vol_note = ""
+        if settings.entry_volume_confirm and provider is not None:
+            confirmed, ratio = _volume_confirmed(provider, tk)
+            if confirmed is False:
+                # Volume lemah — tahan sinyal, cek lagi poll berikutnya.
+                log.info("%s di zona beli tapi volume lemah (%.1fx) — sinyal ditahan.",
+                         tk, ratio or 0.0)
+                return
+            if ratio is not None:
+                vol_note = f" · vol {ratio:.1f}x ✅"
         rec = plan.get("recommendation", "")
         trend = plan.get("trend", "-")
         rrr = plan.get("rrr", "-")
         conf = plan.get("confidence", "-")
         msg = (f"🔵 <b>[BUY SIGNAL]</b> {tk} ({rec}) di area {_rp(entry_low)}–{_rp(entry_high)} "
-               f"(now {_rp(price)})\n"
+               f"(now {_rp(price)}){vol_note}\n"
                f"🎯 TP {_rp(tp)} · 🛑 SL {_rp(sl)} · R:R 1:{rrr} · tren {trend} · confidence {conf}")
         await send_telegram(msg)
         dbm.log_alert(tk, "BUY", price, msg)
@@ -203,7 +241,7 @@ async def poll_once() -> int:
         if price is None:
             continue
         if tk in plans:
-            await _evaluate_plan(tk, plans[tk], price)
+            await _evaluate_plan(tk, plans[tk], price, provider)
         if tk in positions:
             await _evaluate_position(positions[tk], price)
 
